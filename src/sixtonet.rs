@@ -95,8 +95,13 @@ pub async fn serve(cfg: SessionConfig) -> ResultType<()> {
     socket.set_nodelay(true)?;
     let mut stream = Stream::from(socket, addr);
     let (_, key) = Config::get_key_pair();
+    if key.len() != 32 {
+        bail!("the desktop identity key is unavailable");
+    }
     let ready = serde_json::json!({"nonce": cfg.nonce, "id": Config::get_id(), "public_key": key});
     stream.send_raw(serde_json::to_vec(&ready)?).await?;
+    crate::common::set_server_running(true);
+    crate::server::input_service::fix_key_down_timeout_loop();
     let server = crate::server::new();
     let meta = crate::server::ConnectionMeta {
         control_permissions: Some(hbb_common::rendezvous_proto::ControlPermissions {

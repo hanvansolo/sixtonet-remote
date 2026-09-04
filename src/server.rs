@@ -236,12 +236,20 @@ pub async fn create_tcp_connection(
                                 &our_sk_b,
                             )?);
                         } else if pk.asymmetric_value.is_empty() {
+                            #[cfg(feature = "sixtonet")]
+                            if crate::sixtonet::session_password().is_some() {
+                                bail!("SixtoNet desktop encryption is mandatory");
+                            }
                             Config::set_key_confirmed(false);
                             log::info!("Force to update pk");
                         } else {
                             bail!("Handshake failed: invalid public sign key length from peer");
                         }
                     } else {
+                        #[cfg(feature = "sixtonet")]
+                        if crate::sixtonet::session_password().is_some() {
+                            bail!("SixtoNet desktop encryption handshake required");
+                        }
                         log::error!("Handshake failed: invalid message type");
                     }
                 } else {

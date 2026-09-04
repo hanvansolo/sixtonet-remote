@@ -2,6 +2,25 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 #[cfg(all(windows, feature = "sixtonet"))]
+struct DesktopProcess {
+    process: winapi::shared::ntdef::HANDLE,
+    job: winapi::shared::ntdef::HANDLE,
+}
+
+#[cfg(all(windows, feature = "sixtonet"))]
+impl Drop for DesktopProcess {
+    fn drop(&mut self) {
+        unsafe {
+            winapi::um::processthreadsapi::TerminateProcess(self.process, 0);
+            winapi::um::handleapi::CloseHandle(self.process);
+            if !self.job.is_null() {
+                winapi::um::handleapi::CloseHandle(self.job);
+            }
+        }
+    }
+}
+
+#[cfg(all(windows, feature = "sixtonet"))]
 fn main() {
     if let Err(error) = run() {
         eprintln!("SixtoNet desktop: {error}");
@@ -15,7 +34,12 @@ fn run() -> hbb_common::ResultType<()> {
     use librustdesk::sixtonet;
     use std::{path::PathBuf, time::Duration};
     use winapi::um::{
-        handleapi::CloseHandle, processthreadsapi::TerminateProcess, synchapi::WaitForSingleObject,
+        jobapi2::{AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject},
+        synchapi::WaitForSingleObject,
+        winnt::{
+            JobObjectExtendedLimitInformation, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        },
     };
     extern "C" {
         fn is_local_system() -> i32;
@@ -48,8 +72,34 @@ fn run() -> hbb_common::ResultType<()> {
     if handle.is_null() {
         bail!("could not start the physical desktop process");
     }
+    // The OS owns cleanup even if the parent crashes. A child desktop process
+    // must not survive an agent/service shutdown just because no finally ran.
+    let mut owned = DesktopProcess {
+        process: handle,
+        job: std::ptr::null_mut(),
+    };
+    unsafe {
+        owned.job = CreateJobObjectW(std::ptr::null_mut(), std::ptr::null());
+        if owned.job.is_null() {
+            return Err(std::io::Error::last_os_error().into());
+        }
+        let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        if SetInformationJobObject(
+            owned.job,
+            JobObjectExtendedLimitInformation,
+            &mut limits as *mut _ as *mut _,
+            std::mem::size_of_val(&limits) as u32,
+        ) == 0
+            || AssignProcessToJobObject(owned.job, handle) == 0
+        {
+            return Err(std::io::Error::last_os_error().into());
+        }
+    }
     let deadline = config.expires_at;
-    while sixtonet::now()? < deadline && root.join("session.json").exists() {
+    while sixtonet::now().map(|now| now < deadline).unwrap_or(false)
+        && root.join("session.json").exists()
+    {
         let status = unsafe { WaitForSingleObject(handle, 200) };
         if status == 0 {
             break;
@@ -58,10 +108,7 @@ fn run() -> hbb_common::ResultType<()> {
             break;
         }
     }
-    unsafe {
-        TerminateProcess(handle, 0);
-        CloseHandle(handle);
-    }
+    drop(owned);
     std::thread::sleep(Duration::from_millis(50));
     Ok(())
 }

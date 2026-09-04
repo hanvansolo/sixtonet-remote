@@ -1,0 +1,22 @@
+{
+  "name": "@sixtonet/remote-browser",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "protocol": "pbjs -t static-module -w es6 --force-number --no-create --no-verify --no-convert --no-delimited -o protocol.js ../libs/hbb_common/protos/message.proto",
+    "build": "npm run protocol && esbuild viewer.js --bundle --format=iife --global-name=SixtoDesktop --minify --legal-comments=inline --outfile=dist/desktop.js",
+    "test": "npm run protocol && node --test test/*.test.js",
+    "test:browser": "npm run protocol && esbuild test/browser-fixture.js --bundle --format=iife --outfile=dist/browser-fixture.js && playwright test"
+  },
+  "dependencies": {
+    "protobufjs": "8.8.0",
+    "tweetnacl": "1.0.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.58.2",
+    "esbuild": "0.28.2",
+    "protobufjs-cli": "2.7.0"
+  }
+}

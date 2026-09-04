@@ -34,4 +34,26 @@ Existing runtime changes are limited to two `sixtonet` feature-gated hooks in
 `src/server/connection.rs`: use the in-memory session password, and do not start
 the separate native connection-manager UI. Both hooks are inactive for ordinary
 RustDesk sessions. `Cargo.toml` and `src/lib.rs` register the opt-in adapter.
-No other upstream capture, encoding, input, or authorization paths are replaced.
+`src/server.rs` additionally refuses the legacy unencrypted handshake fallback
+only for the initialized SixtoNet adapter. Ordinary RustDesk paths are unchanged.
+No upstream capture, encoding, or input implementations are replaced.
+
+`sixtonet-web` contains the AGPL browser adapter and its pinned npm build. It uses
+the pinned `hbb_common` protobuf schema, TweetNaCl and WebCodecs VP9; no screenshots,
+WASM codec downloads, external CDN scripts, or technician-side native executable.
+Run `npm ci`, `npm test`, and `npm run build` in that directory. The generated
+`dist/desktop.js` is the asset served by the SixtoNet console. Preserve its source
+notice. The source here plus the recursively pinned native submodules and build
+workflow are the reproducible source for this component.
+
+Preview scope: video, monitor selection, fullscreen, quality, mouse and keyboard.
+Not yet implemented/verified in the browser: audio, clipboard sync, native file
+transfer, chat, recording, privacy mode, remote printing, tunnelling, wake-on-LAN,
+reboot/reconnect, mobile control, cross-platform agents and all display/session
+transition cases. Do not describe retaining those upstream sources as delivering
+those browser features. The existing SixtoNet terminal/files tools are separate.
+
+Release gates: successful Windows build; lab capture/input including lock/UAC and
+disconnect tests; visible endpoint session indication; signed release artifacts;
+agent bundle checksum/preflight and canary validation. Until those gates pass,
+the adapter is an unsigned test artifact, not a customer rollout.

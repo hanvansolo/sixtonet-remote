@@ -109,6 +109,7 @@ winapi = { version = "0.3", features = [
     "shellscalingapi",
     "pdh",
     "synchapi",
+    "jobapi2",
     "memoryapi",
     "shellapi",
     "devguid",
