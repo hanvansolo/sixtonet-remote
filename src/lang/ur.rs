@@ -745,6 +745,11 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Display Name", "display-name"),
         ("password-hidden-tip", ""),
         ("preset-password-in-use-tip", ""),
+        ("Export", "برآمد کریں"),
+        ("Export Logs", "لاگز برآمد کریں"),
+        ("Import Folder", "فولڈر درآمد کریں"),
+        ("Reuse one connection for port forwarding", "پورٹ فارورڈنگ کے لیے ایک ہی کنکشن دوبارہ استعمال کریں"),
+        ("port-forward-mux-tip", "ایک پورٹ فارورڈنگ کے تمام کنکشن دوسرے کمپیوٹر کے ساتھ بنے ایک ہی کنکشن سے گزرتے ہیں، ہر ایک کے لیے دوبارہ منسلک ہو کر لاگ اِن کرنے کے بجائے۔"),
     ].iter().cloned().collect();
 }
 

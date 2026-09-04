@@ -763,5 +763,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Lock canvas", ""),
         ("Sync clipboard between sessions", ""),
         ("sync-clipboard-between-sessions-tip", ""),
+        ("Reuse one connection for port forwarding", ""),
+        ("port-forward-mux-tip", ""),
     ].iter().cloned().collect();
 }
