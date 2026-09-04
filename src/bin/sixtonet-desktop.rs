@@ -22,6 +22,11 @@ impl Drop for DesktopProcess {
 
 #[cfg(all(windows, feature = "sixtonet"))]
 fn main() {
+    // Same process DPI setup as upstream src/main.rs, before any display or
+    // input APIs run. Windows can already have set it through the manifest.
+    unsafe {
+        winapi::um::shellscalingapi::SetProcessDpiAwareness(2);
+    }
     if let Err(error) = run() {
         eprintln!("SixtoNet desktop: {error}");
         std::process::exit(1);

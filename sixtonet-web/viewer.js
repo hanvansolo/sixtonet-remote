@@ -31,7 +31,7 @@ export class Viewer {
   constructor(root, {url, exec, input = false}) {
     this.root = root; this.url = url; this.exec = exec; this.allowInput = input;
     this.cipher = new Cipher(); this.closed = false; this.control = false;
-    this.held = new Map(); this.buttons = new Set(); this.lastFrame = 0;
+    this.held = new Map(); this.buttons = new Set(); this.lastFrame = 0; this.lastPacket = 0;
     this.displays = []; this.displayIndex = 0; this.frames = 0; this.bytes = 0;
     this.events = new AbortController(); this.pending = 0;
     const head = element('div', '', 'card-head');
@@ -63,6 +63,7 @@ export class Viewer {
     on(this.controlButton, 'click', () => {
       this.releaseInput(); this.control = !this.control;
       this.controlButton.textContent = this.control ? 'Give back control' : 'Take control';
+      this.controlButton.classList.toggle('primary', this.control);
       if (this.control) this.canvas.focus();
     });
     on(full, 'click', () => this.stage.requestFullscreen().catch(() => {}));
@@ -80,7 +81,9 @@ export class Viewer {
       if (!root.isConnected) { this.close(); return; }
       this.stats.textContent = this.frames ? `${this.frames} fps · ${(this.bytes * 8 / 1e6).toFixed(1)} Mbps` : '';
       this.frames = 0; this.bytes = 0;
-      if (this.lastFrame && Date.now() - this.lastFrame > 5000) {
+      // A still desktop legitimately produces no delta frames. Use RustDesk's
+      // authenticated heartbeat for liveness, not changing pixels.
+      if (this.lastFrame && Date.now() - this.lastPacket > 5000) {
         this.releaseInput(); this.control = false; this.controlButton.disabled = true;
         this.status.textContent = 'Waiting for the next desktop frame; control is suspended.';
       }
@@ -97,7 +100,8 @@ export class Viewer {
     this.startButton.disabled = true; this.status.textContent = 'Connecting to the endpoint desktop engine…';
     this.decoder = new VideoDecoder({output: frame => {
       if (this.closed) { frame.close(); return; }
-      this.canvas.width = frame.displayWidth; this.canvas.height = frame.displayHeight;
+      if (this.canvas.width !== frame.displayWidth) this.canvas.width = frame.displayWidth;
+      if (this.canvas.height !== frame.displayHeight) this.canvas.height = frame.displayHeight;
       this.canvas.getContext('2d', {alpha:false}).drawImage(frame, 0, 0); frame.close();
       this.canvas.hidden = false; this.lastFrame = Date.now(); this.frames++;
       this.controlButton.disabled = !this.allowInput;
@@ -138,6 +142,7 @@ export class Viewer {
     if (!this.identity || data.byteLength > 8*1024*1024) throw Error('Invalid desktop handshake order');
     this.bytes += data.byteLength;
     const message = this.cipher.decode(new Uint8Array(data));
+    this.lastPacket = Date.now();
     if (message.signedId) {
       this.ws.send(this.cipher.handshake(message.signedId.id, this.identity)); return;
     }
@@ -165,12 +170,21 @@ export class Viewer {
     }
     if (message.testDelay && !message.testDelay.fromClient) this.send({testDelay:message.testDelay});
     if (message.misc?.closeReason) throw Error(message.misc.closeReason);
+    if (message.misc?.switchDisplay) {
+      const d = message.misc.switchDisplay;
+      if (d.width > 0 && d.height > 0 && this.displays[d.display || 0]) {
+        this.displays[d.display || 0] = {...this.displays[d.display || 0],
+          x:d.x || 0, y:d.y || 0, width:d.width, height:d.height};
+      }
+    }
     if (message.misc?.permissionInfo?.permission === 0 && !message.misc.permissionInfo.enabled) {
       this.releaseInput(); this.allowInput = false; this.control = false; this.controlButton.disabled = true;
     }
     if (message.videoFrame) {
       const video = message.videoFrame;
-      if ((video.display || 0) !== this.displayIndex) return;
+      if ((video.display || 0) !== this.displayIndex) {
+        this.send({misc:{videoReceived:true}}); return;
+      }
       if (!video.vp9s) throw Error('The endpoint selected a codec this browser viewer did not negotiate');
       for (const frame of video.vp9s.frames) {
         if (this.needKey && !frame.key) continue;
@@ -192,7 +206,7 @@ export class Viewer {
     if (this.ws.bufferedAmount > 1024*1024) { this.fail('Desktop input transport is congested.'); return; }
     this.ws.send(this.cipher.encode(message));
   }
-  canInput() { return this.control && this.allowInput && Date.now() - this.lastFrame < 5000; }
+  canInput() { return this.control && this.allowInput && this.lastFrame > 0 && Date.now() - this.lastPacket < 5000; }
   inputEvents(on) {
     const c = this.canvas;
     on(c, 'contextmenu', e => { if (this.canInput()) e.preventDefault(); });
