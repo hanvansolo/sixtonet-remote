@@ -53,7 +53,7 @@ export class Viewer {
     this.canvas = element('canvas'); this.canvas.tabIndex = 0;
     this.canvas.setAttribute('aria-label', 'Remote desktop. Take control to use mouse and keyboard.');
     this.canvas.hidden = true; this.stage.append(this.canvas);
-    const source = element('a', 'RustDesk engine · source');
+    const source = element('a', 'Open-source licences');
     source.href = 'https://github.com/hanvansolo/sixtonet-remote/tree/sixtonet';
     source.target = '_blank'; source.rel = 'noopener noreferrer'; source.className = 'sub';
     head.append(this.startButton, this.controlButton, this.monitor, quality, full, sas, this.stats);
