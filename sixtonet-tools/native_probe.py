@@ -103,8 +103,6 @@ def probe(engine, deps):
     from nacl.public import Box, PrivateKey, PublicKey
     from nacl.secret import SecretBox
     from nacl.signing import VerifyKey
-    import ctypes
-    from ctypes import wintypes
     # SYSTEM SID is checked independently by the native executable too.
     if os.name != "nt":
         raise RuntimeError("Windows-only lab test")
@@ -119,7 +117,7 @@ def probe(engine, deps):
         raise RuntimeError("another desktop grant exists; refusing to disturb it")
     owned = False
     proc = conn = None
-    deadline = time.time() + 60
+    deadline = time.time() + 55  # leave five seconds for bounded process cleanup
     nonce, password = secrets.token_hex(32), secrets.token_hex(32)
     result = {"engine": "rustdesk", "view_only": True, "saved_media": False,
               "authenticated": False, "displays": [], "vp9_frame_bytes": []}
