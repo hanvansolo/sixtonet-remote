@@ -1,0 +1,57 @@
+name: SixtoNet Windows desktop adapter
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    env:
+      VCPKG_DEFAULT_TRIPLET: x64-windows-static
+      VCPKG_DEFAULT_HOST_TRIPLET: x64-windows-static
+      LIBCLANG_PATH: C:\Program Files\LLVM\bin
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
+        with:
+          toolchain: '1.88.0'
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
+        with:
+          prefix-key: sixtonet-windows
+      - uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2
+        with:
+          vcpkgDirectory: C:\vcpkg
+          vcpkgGitCommitId: 120deac3062162151622ca4860575a33844ba10b
+      - name: Build software video and audio dependencies
+        shell: pwsh
+        run: |
+          & "$env:VCPKG_ROOT\vcpkg.exe" install --classic --triplet x64-windows-static libvpx libyuv opus aom libjpeg-turbo
+          if ($LASTEXITCODE -ne 0) { throw 'Native dependency build failed' }
+      - name: Build and test the opt-in adapter
+        shell: pwsh
+        run: |
+          cargo test --locked --lib --features sixtonet sixtonet::tests
+          if ($LASTEXITCODE -ne 0) { throw 'Adapter tests failed' }
+          cargo build --locked --release --features sixtonet --bin sixtonet-desktop
+          if ($LASTEXITCODE -ne 0) { throw 'Adapter build failed' }
+          Get-FileHash target/release/sixtonet-desktop.exe -Algorithm SHA256 | Format-List
+      - name: Preserve source and licence alongside the unsigned test artifact
+        shell: pwsh
+        run: |
+          Copy-Item LICENCE target/release/LICENCE
+          Copy-Item SIXTONET.md target/release/SIXTONET.md
+          git rev-parse HEAD
+          git submodule status --recursive
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sixtonet-desktop-windows-x64-UNSIGNED
+          path: |
+            target/release/sixtonet-desktop.exe
+            target/release/LICENCE
+            target/release/SIXTONET.md
+          retention-days: 14
+          if-no-files-found: error

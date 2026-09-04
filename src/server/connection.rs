@@ -2294,6 +2294,10 @@ impl Connection {
     }
 
     fn validate_password(&mut self, allow_permanent_password: bool) -> bool {
+        #[cfg(feature = "sixtonet")]
+        if let Some(secret) = crate::sixtonet::session_password() {
+            return self.validate_password_plain(secret);
+        }
         if password::temporary_enabled() {
             let password = password::temporary_password();
             if self.validate_password_plain(&password) {
@@ -2471,6 +2475,13 @@ impl Connection {
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     fn try_start_cm_ipc(&mut self) {
+        #[cfg(feature = "sixtonet")]
+        if crate::sixtonet::session_password().is_some() {
+            // The signed RMM session owns authorization and the operator UI.
+            // Drop the receiver rather than accumulate an unconsumed CM queue.
+            self.start_cm_ipc_para.take();
+            return;
+        }
         if let Some(p) = self.start_cm_ipc_para.take() {
             tokio::spawn(async move {
                 #[cfg(windows)]

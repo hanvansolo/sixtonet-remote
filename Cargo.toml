@@ -21,6 +21,7 @@ name = "service"
 path = "src/service.rs"
 
 [features]
+sixtonet = []
 inline = []
 use_samplerate = ["samplerate"]
 use_rubato = ["rubato"]
