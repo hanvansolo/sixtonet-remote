@@ -57,6 +57,12 @@ fn run() -> hbb_common::ResultType<()> {
         .join("desktop");
     let config = sixtonet::read_config(&root.join("session.json"))?;
     if std::env::args().nth(1).as_deref() == Some("--server") {
+        if std::env::var("SIXTONET_CAPTURE_DIAGNOSTICS").as_deref() == Ok("1") {
+            if config.input || config.clipboard || config.audio {
+                bail!("capture diagnostics require a view-only lab session");
+            }
+            sixtonet::capture_diagnostics(&root.join("capture-diagnostic.log"))?;
+        }
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()?;

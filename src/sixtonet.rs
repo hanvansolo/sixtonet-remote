@@ -20,6 +20,29 @@ pub fn session_password() -> Option<&'static str> {
     PASSWORD.get().map(String::as_str)
 }
 
+/// Opt-in lab metadata only: bounded video-service state/errors, never protocol
+/// messages, screen pixels, clipboard text, input, credentials or other logs.
+pub fn capture_diagnostics(path: &Path) -> ResultType<()> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let file = std::fs::File::create(path)?;
+    let lines = AtomicUsize::new(0);
+    hbb_common::env_logger::Builder::new()
+        .filter_level(hbb_common::log::LevelFilter::Off)
+        .filter_module("librustdesk::server::video_service", hbb_common::log::LevelFilter::Info)
+        .filter_module("librustdesk::server::service", hbb_common::log::LevelFilter::Error)
+        .format(move |out, record| {
+            if lines.fetch_add(1, Ordering::Relaxed) >= 200 {
+                return Ok(());
+            }
+            let message: String = record.args().to_string().chars().take(512).collect();
+            writeln!(out, "{}: {}", record.target(), message)
+        })
+        .target(hbb_common::env_logger::Target::Pipe(Box::new(file)))
+        .try_init()?;
+    Ok(())
+}
+
 pub const MAX_CLIPBOARD_TEXT: usize = 1024 * 1024;
 
 pub fn browser_clipboard(text: String) -> Option<hbb_common::message_proto::Clipboard> {
