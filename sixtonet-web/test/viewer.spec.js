@@ -42,6 +42,7 @@ test('real browser decrypts VP9 inter-frames, gates input and releases held keys
   await page.getByRole('button',{name:'Pop out',exact:true}).click();
   const popup=await popupPromise;
   await expect(popup.locator('canvas')).toBeVisible();
+  await expect(popup.locator('body')).toHaveCSS('background-color','rgb(32, 33, 40)');
   await popup.locator('canvas').focus();
   await popup.keyboard.press('Z');
   expect(await page.evaluate(()=>observed.keys.some(k=>k.unicode===90))).toBe(true);

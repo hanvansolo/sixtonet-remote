@@ -134,7 +134,20 @@ export class Viewer {
     const doc = popup.document;
     doc.title = this.title;
     const base = doc.createElement('base'); base.href = document.baseURI; doc.head.append(base);
-    for (const style of document.querySelectorAll('link[rel="stylesheet"],style')) doc.head.append(style.cloneNode(true));
+    for (const sheet of document.styleSheets) {
+      if (sheet.disabled) continue;
+      try {
+        // Snapshot the already loaded same-origin console styles. A blank
+        // auxiliary window must not depend on a second stylesheet fetch.
+        const copy = new popup.CSSStyleSheet();
+        copy.replaceSync([...sheet.cssRules].map(rule => rule.cssText).join('\n'));
+        doc.adoptedStyleSheets = [...doc.adoptedStyleSheets, copy];
+      } catch {
+        if (sheet.href) {
+          const link = doc.createElement('link'); link.rel = 'stylesheet'; link.href = sheet.href; doc.head.append(link);
+        }
+      }
+    }
     doc.body.className = 'desktop-popout';
     this.anchor = document.createComment('desktop pop-out return point');
     this.root.before(this.anchor);
