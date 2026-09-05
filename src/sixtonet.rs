@@ -20,6 +20,26 @@ pub fn session_password() -> Option<&'static str> {
     PASSWORD.get().map(String::as_str)
 }
 
+pub const MAX_CLIPBOARD_TEXT: usize = 1024 * 1024;
+
+pub fn browser_clipboard(text: String) -> Option<hbb_common::message_proto::Clipboard> {
+    if text.len() > MAX_CLIPBOARD_TEXT {
+        return None;
+    }
+    Some(hbb_common::message_proto::Clipboard {
+        content: text.into_bytes().into(),
+        format: hbb_common::message_proto::ClipboardFormat::Text.into(),
+        ..Default::default()
+    })
+}
+
+pub fn valid_browser_clipboard(cb: &hbb_common::message_proto::Clipboard) -> bool {
+    !cb.compress
+        && cb.format.enum_value() == Ok(hbb_common::message_proto::ClipboardFormat::Text)
+        && cb.content.len() <= MAX_CLIPBOARD_TEXT
+        && std::str::from_utf8(&cb.content).is_ok()
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SessionConfig {
@@ -122,6 +142,17 @@ pub async fn serve(cfg: SessionConfig) -> ResultType<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn clipboard_is_bounded_plain_utf8_only() {
+        let mut cb = browser_clipboard("Mixed CASE £ 👋".into()).unwrap();
+        assert!(valid_browser_clipboard(&cb));
+        cb.compress = true;
+        assert!(!valid_browser_clipboard(&cb));
+        cb.compress = false;
+        cb.format = hbb_common::message_proto::ClipboardFormat::Html.into();
+        assert!(!valid_browser_clipboard(&cb));
+        assert!(browser_clipboard("x".repeat(MAX_CLIPBOARD_TEXT + 1)).is_none());
+    }
     fn config() -> SessionConfig {
         SessionConfig {
             port: 45000,

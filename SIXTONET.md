@@ -30,13 +30,17 @@ This is integration work in progress, not a claim of browser feature parity.
 The RustDesk native code is retained in full. The browser viewer and agent relay
 must pass end-to-end tests before this adapter can be released to endpoints.
 
-Existing runtime changes are limited to two `sixtonet` feature-gated hooks in
+Existing runtime changes include `sixtonet` feature-gated hooks in
 `src/server/connection.rs`: use the in-memory session password, and do not start
 the separate native connection-manager UI. Both hooks are inactive for ordinary
 RustDesk sessions. `Cargo.toml` and `src/lib.rs` register the opt-in adapter.
 `src/server.rs` additionally refuses the legacy unencrypted handshake fallback
 only for the initialized SixtoNet adapter. Ordinary RustDesk paths are unchanged.
-No upstream capture, encoding, or input implementations are replaced.
+No upstream capture, encoding, or input implementations are replaced. The adapter
+follows the active Windows user session (including an active non-console session),
+without performing a Windows logon or bypassing its lock screen. Clipboard hooks
+restrict the browser adapter to uncompressed UTF-8 text, at most 1 MiB, when the
+signed session separately grants two-way clipboard sharing.
 
 `sixtonet-web` contains the AGPL browser adapter and its pinned npm build. It uses
 the pinned `hbb_common` protobuf schema, TweetNaCl and WebCodecs VP9; no screenshots,

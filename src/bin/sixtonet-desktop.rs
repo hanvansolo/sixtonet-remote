@@ -67,15 +67,17 @@ fn run() -> hbb_common::ResultType<()> {
         }
         return result;
     }
-    let session_id = librustdesk::platform::windows::get_current_session_id(false);
+    // Follow the active interactive user, not a disconnected physical console.
+    // This shares their existing desktop; it does not log on or unlock Windows.
+    let session_id = librustdesk::platform::windows::get_current_session_id(true);
     if session_id == u32::MAX {
-        bail!("Windows has no physical console session");
+        bail!("Windows has no interactive desktop session");
     }
     let exe = std::env::current_exe()?;
     let cmd = format!("\"{}\" --server", exe.display());
     let handle = librustdesk::platform::windows::launch_privileged_process(session_id, &cmd)?;
     if handle.is_null() {
-        bail!("could not start the physical desktop process");
+        bail!("could not start the active desktop process");
     }
     // The OS owns cleanup even if the parent crashes. A child desktop process
     // must not survive an agent/service shutdown just because no finally ran.

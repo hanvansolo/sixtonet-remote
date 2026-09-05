@@ -689,6 +689,15 @@ mod proto {
 
     #[cfg(not(target_os = "android"))]
     fn clipboard_data_to_proto(data: ClipboardData) -> Option<Clipboard> {
+        // The browser preview grants text only, with a bounded uncompressed
+        // payload. Do not send rich formats or require a browser Zstd decoder.
+        #[cfg(feature = "sixtonet")]
+        if crate::sixtonet::session_password().is_some() {
+            return match data {
+                ClipboardData::Text(text) => crate::sixtonet::browser_clipboard(text),
+                _ => None,
+            };
+        }
         let d = match data {
             ClipboardData::Text(s) => plain_to_proto(s, ClipboardFormat::Text),
             ClipboardData::Rtf(s) => plain_to_proto(s, ClipboardFormat::Rtf),

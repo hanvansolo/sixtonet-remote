@@ -3046,6 +3046,12 @@ impl Connection {
                     self.update_auto_disconnect_timer();
                 }
                 Some(message::Union::Clipboard(cb)) => {
+                    #[cfg(feature = "sixtonet")]
+                    if crate::sixtonet::session_password().is_some()
+                        && !crate::sixtonet::valid_browser_clipboard(&cb)
+                    {
+                        return true;
+                    }
                     if self.should_handle_text_clipboard_message() && self.clipboard_enabled() {
                         #[cfg(not(any(target_os = "android", target_os = "ios")))]
                         update_clipboard(vec![cb], ClipboardSide::Host);
@@ -3074,6 +3080,13 @@ impl Connection {
                     }
                 }
                 Some(message::Union::MultiClipboards(_mcb)) => {
+                    #[cfg(feature = "sixtonet")]
+                    if crate::sixtonet::session_password().is_some()
+                        && (_mcb.clipboards.len() != 1
+                            || !_mcb.clipboards.iter().all(crate::sixtonet::valid_browser_clipboard))
+                    {
+                        return true;
+                    }
                     if self.should_handle_text_clipboard_message() && self.clipboard_enabled() {
                         #[cfg(not(any(target_os = "android", target_os = "ios")))]
                         update_clipboard(_mcb.clipboards, ClipboardSide::Host);
