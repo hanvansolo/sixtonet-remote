@@ -14,6 +14,13 @@ test('real browser decrypts VP9 inter-frames, gates input and releases held keys
         '<!doctype html><html><head><meta charset="utf-8"><title>SixtoNet desktop test</title><link rel="stylesheet" href="/style.css"></head><body><h1>Remote Desktop — protocol test</h1><div id="viewer"></div><script src="/fixture.js"></script></body></html>'});
   });
   await page.goto('https://desktop.test/');
+  const buttons = page.locator('.desktop-icon');
+  await expect(buttons).toHaveCount(9);
+  for (const button of await buttons.all()) {
+    await expect(button.locator('svg[aria-hidden="true"]')).toHaveCount(1);
+    await expect(button).toHaveText('');
+    await expect(button).toHaveAttribute('title', await button.getAttribute('aria-label'));
+  }
   await expect(page.getByRole('link',{name:'Open-source licences',exact:true})).toHaveCount(0);
   await expect(page.getByText('RustDesk engine · source',{exact:true})).toHaveCount(0);
   await page.getByRole('button',{name:'Start desktop'}).click();
@@ -23,6 +30,7 @@ test('real browser decrypts VP9 inter-frames, gates input and releases held keys
   await c.click({position:{x:500,y:250}});
   expect(await page.evaluate(()=>observed.mouse.length)).toBe(0);
   await page.getByRole('button',{name:'Take control',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Give back control'})).toHaveAttribute('aria-pressed','true');
   await c.click({position:{x:400,y:220}});
   await page.keyboard.down('Control');
   await page.keyboard.press('a');
@@ -43,6 +51,12 @@ test('real browser decrypts VP9 inter-frames, gates input and releases held keys
   const popupPromise=page.waitForEvent('popup');
   await page.getByRole('button',{name:'Pop out',exact:true}).click();
   const popup=await popupPromise;
+  await expect(popup.getByRole('button',{name:'Pop out',exact:true})).toHaveCount(0);
+  await expect(popup.locator('button[aria-label="Pop out"]')).toBeHidden();
+  await popup.getByRole('button',{name:'Actual size',exact:true}).click();
+  await expect(popup.getByRole('button',{name:'Fit to window'})).toHaveAttribute('title','Fit to window');
+  await expect(popup.getByRole('button',{name:'Fit to window'}).locator('svg')).toHaveCount(1);
+  await popup.getByRole('button',{name:'Fit to window'}).click();
   await expect(popup.locator('canvas')).toBeVisible();
   await expect(popup.locator('body')).toHaveCSS('background-color','rgb(32, 33, 40)');
   await popup.locator('canvas').focus();
@@ -51,6 +65,7 @@ test('real browser decrypts VP9 inter-frames, gates input and releases held keys
   expect(await page.evaluate(()=>observed.commands.filter(c=>c==='desktop_open').length)).toBe(1);
   await page.getByRole('button',{name:'Return desktop to this tab'}).click();
   await expect(c).toBeVisible();
+  await expect(page.getByRole('button',{name:'Pop out',exact:true})).toBeVisible();
   expect(await page.evaluate(()=>viewer.closed)).toBe(false);
   await page.screenshot({path:'test-results/viewer.png',fullPage:true});
   await page.evaluate(()=>viewer.close());

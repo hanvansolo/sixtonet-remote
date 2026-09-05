@@ -16,6 +16,22 @@ function element(tag, text, cls) {
   if (cls) e.className = cls;
   return e;
 }
+function buttonLabel(button, label) {
+  button.title = label;
+  button.setAttribute('aria-label', label);
+}
+function iconButton(label, path, cls = '') {
+  const button = element('button', '', `btn sm desktop-icon ${cls}`.trim());
+  button.type = 'button';
+  buttonLabel(button, label);
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  for (const [key, value] of Object.entries({viewBox:'0 0 24 24', width:20, height:20,
+    fill:'none', stroke:'currentColor', 'stroke-width':1.8, 'stroke-linecap':'round',
+    'stroke-linejoin':'round', 'aria-hidden':'true', focusable:'false'})) svg.setAttribute(key, value);
+  const shape = document.createElementNS(svg.namespaceURI, 'path');
+  shape.setAttribute('d', path); svg.append(shape); button.append(svg);
+  return button;
+}
 function modifiers(e) {
   return [e.altKey && CK.Alt, e.ctrlKey && CK.Control, e.shiftKey && CK.Shift,
     e.metaKey && CK.Meta].filter(Boolean);
@@ -50,15 +66,17 @@ export class Viewer {
     this.displays = []; this.displayIndex = 0; this.frames = 0; this.bytes = 0;
     this.events = new AbortController(); this.pending = 0;
     const head = element('div', '', 'card-head');
-    this.startButton = element('button', 'Start desktop', 'btn sm primary');
-    this.controlButton = element('button', 'Take control', 'btn sm');
+    this.startButton = iconButton('Start desktop', 'M8 5l11 7-11 7Z', 'primary');
+    this.controlButton = iconButton('Take control', 'M4 3l6 17 3-7 7-3Z M13 13l6 6');
+    this.controlButton.setAttribute('aria-pressed', 'false');
     this.controlButton.disabled = true;
     this.monitor = element('select', '', 'sel'); this.monitor.setAttribute('aria-label', 'Remote monitor');
-    const full = element('button', 'Full screen', 'btn sm');
-    const popout = element('button', 'Pop out', 'btn sm');
-    const fit = element('button', 'Actual size', 'btn sm');
-    const disconnect = element('button', 'Disconnect desktop', 'btn sm');
-    const sas = element('button', 'Ctrl+Alt+Delete', 'btn sm');
+    const full = iconButton('Full screen', 'M8 3H3v5 M16 3h5v5 M3 16v5h5 M21 16v5h-5');
+    const popout = this.popoutButton = iconButton('Pop out', 'M14 3h7v7 M21 3l-9 9 M10 5H4v15h15v-6');
+    const fit = iconButton('Actual size', 'M4 8V4h4 M16 4h4v4 M20 16v4h-4 M8 20H4v-4 M8 8h8v8H8Z');
+    fit.setAttribute('aria-pressed', 'false');
+    const disconnect = iconButton('Disconnect desktop', 'M12 3v9 M6 5a9 9 0 1 0 12 0', 'danger');
+    const sas = iconButton('Ctrl+Alt+Delete', 'M3 5h18v14H3Z M7 9h.01 M11 9h.01 M15 9h.01 M7 13h.01 M11 13h.01 M15 13h2 M7 16h10');
     sas.disabled = !input;
     const quality = element('select', '', 'sel'); quality.setAttribute('aria-label', 'Stream quality');
     for (const [v,t] of [[2,'Low bandwidth'],[3,'Balanced'],[4,'Best quality']]) {
@@ -69,8 +87,8 @@ export class Viewer {
     this.stats = element('span', '', 'sub');
     this.clipStatus = element('p', clipboard ? 'Text clipboard sharing is enabled. Paste here with Ctrl+V; copy remote text with the button.' :
       'Two-way clipboard is off. Enable it when opening the live session.', 'sub');
-    const paste = element('button', 'Paste local clipboard', 'btn sm');
-    this.copy = element('button', 'Copy remote clipboard', 'btn sm');
+    const paste = iconButton('Paste local clipboard', 'M9 4H5v17h14V4h-4 M9 2h6v4H9Z M12 9v8 M9 14l3 3 3-3');
+    this.copy = iconButton('Copy remote clipboard', 'M9 4H5v17h14V4h-4 M9 2h6v4H9Z M12 17V9 M9 12l3-3 3 3');
     paste.disabled = !clipboard || !input; this.copy.disabled = true;
     this.stage = element('div', '', 'desktop-stage');
     this.canvas = element('canvas'); this.canvas.tabIndex = 0;
@@ -82,7 +100,8 @@ export class Viewer {
     on(this.startButton, 'click', () => this.start().catch(e => this.fail(e.message)));
     on(this.controlButton, 'click', () => {
       this.releaseInput(); this.control = !this.control;
-      this.controlButton.textContent = this.control ? 'Give back control' : 'Take control';
+      buttonLabel(this.controlButton, this.control ? 'Give back control' : 'Take control');
+      this.controlButton.setAttribute('aria-pressed', String(this.control));
       this.controlButton.classList.toggle('primary', this.control);
       if (this.control) this.canvas.focus();
     });
@@ -93,7 +112,8 @@ export class Viewer {
     on(popout, 'click', () => this.popOut());
     on(fit, 'click', () => {
       const actual = this.stage.classList.toggle('actual-size');
-      fit.textContent = actual ? 'Fit to window' : 'Actual size';
+      buttonLabel(fit, actual ? 'Fit to window' : 'Actual size');
+      fit.setAttribute('aria-pressed', String(actual));
     });
     on(disconnect, 'click', () => { this.status.textContent = 'Desktop disconnected.'; this.close(); });
     on(paste, 'click', () => this.pasteLocal());
@@ -119,6 +139,9 @@ export class Viewer {
       // authenticated heartbeat for liveness, not changing pixels.
       if (this.lastFrame && Date.now() - this.lastPacket > 5000) {
         this.releaseInput(); this.control = false; this.controlButton.disabled = true;
+        buttonLabel(this.controlButton, 'Take control');
+        this.controlButton.setAttribute('aria-pressed', 'false');
+        this.controlButton.classList.remove('primary');
         this.status.textContent = 'Waiting for the next desktop frame; control is suspended.';
       }
     }, 1000);
@@ -153,6 +176,7 @@ export class Viewer {
     this.anchor.before(this.placeholder);
     this.placeholder.addEventListener('click', () => this.returnToTab(), {signal:this.events.signal});
     doc.body.append(this.root);
+    this.popoutButton.hidden = true;
     popup.addEventListener('blur', () => this.releaseInput(), {signal:this.events.signal});
     popup.addEventListener('pagehide', () => this.returnToTab(), {signal:this.events.signal});
     doc.addEventListener('visibilitychange', () => { if (doc.hidden) this.releaseInput(); }, {signal:this.events.signal});
@@ -162,6 +186,7 @@ export class Viewer {
     const popup = this.popup;
     if (!popup) return;
     this.popup = null; this.releaseInput();
+    this.popoutButton.hidden = false;
     this.placeholder?.remove();
     if (this.anchor?.isConnected) this.anchor.replaceWith(this.root);
     else this.close();
