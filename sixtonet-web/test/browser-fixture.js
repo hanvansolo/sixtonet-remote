@@ -78,7 +78,7 @@ async function video() {
     ctx.fillStyle='#6c63ff';ctx.fillRect(30+frame%400,140,200,150);
     ctx.fillStyle='#fff';ctx.font='32px sans-serif';ctx.fillText('Synthetic VP9 stream — not an endpoint',30,70);
     const vf=new VideoFrame(canvas,{timestamp:frame*33333});
-    encoder.encode(vf,{keyFrame:forceKey||frame++%60===0});forceKey=false;vf.close();
+    encoder.encode(vf,{keyFrame:forceKey||frame%60===0});frame++;forceKey=false;vf.close();
   },10);
 }
 window.viewer=new Viewer(document.querySelector('#viewer'),{url:'wss://localhost/test',input:true,
