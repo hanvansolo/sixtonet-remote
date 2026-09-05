@@ -14,8 +14,7 @@ test('real browser decrypts VP9 inter-frames, gates input and releases held keys
         '<!doctype html><html><head><meta charset="utf-8"><title>SixtoNet desktop test</title><link rel="stylesheet" href="/style.css"></head><body><h1>Remote Desktop — protocol test</h1><div id="viewer"></div><script src="/fixture.js"></script></body></html>'});
   });
   await page.goto('https://desktop.test/');
-  await expect(page.getByRole('link',{name:'Open-source licences',exact:true})).toHaveAttribute('href',
-    'https://github.com/hanvansolo/sixtonet-remote/tree/sixtonet');
+  await expect(page.getByRole('link',{name:'Open-source licences',exact:true})).toHaveCount(0);
   await expect(page.getByText('RustDesk engine · source',{exact:true})).toHaveCount(0);
   await page.getByRole('button',{name:'Start desktop'}).click();
   await expect(page.getByText('Live · view only',{exact:true})).toBeVisible({timeout:15000});

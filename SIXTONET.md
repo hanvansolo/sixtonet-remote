@@ -5,7 +5,8 @@ Upstream: https://github.com/rustdesk/rustdesk (baseline tag `1.4.9`).
 Corresponding source: https://github.com/hanvansolo/sixtonet-remote/tree/sixtonet
 
 Keep `LICENCE`, upstream copyright notices, submodule source references, and this
-source offer with every binary and in the browser viewer's About/Source link.
+source offer with every binary. The console exposes source and licence links
+under Help → About, outside the desktop viewer.
 
 ## Integration boundary
 

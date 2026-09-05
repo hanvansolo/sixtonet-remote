@@ -76,11 +76,8 @@ export class Viewer {
     this.canvas = element('canvas'); this.canvas.tabIndex = 0;
     this.canvas.setAttribute('aria-label', 'Remote desktop. Take control to use mouse and keyboard.');
     this.canvas.hidden = true; this.stage.append(this.canvas);
-    const source = element('a', 'Open-source licences');
-    source.href = 'https://github.com/hanvansolo/sixtonet-remote/tree/sixtonet';
-    source.target = '_blank'; source.rel = 'noopener noreferrer'; source.className = 'sub';
     head.append(this.startButton, this.controlButton, this.monitor, quality, popout, full, fit, sas, paste, this.copy, disconnect, this.stats);
-    root.append(head, this.status, this.clipStatus, this.stage, source);
+    root.append(head, this.status, this.clipStatus, this.stage);
     const on = (el, name, fn) => el.addEventListener(name, fn, {signal:this.events.signal});
     on(this.startButton, 'click', () => this.start().catch(e => this.fail(e.message)));
     on(this.controlButton, 'click', () => {
