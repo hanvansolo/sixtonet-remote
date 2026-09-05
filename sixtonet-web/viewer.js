@@ -116,6 +116,8 @@ export class Viewer {
       if (!root.isConnected) { this.close(); return; }
       this.stats.textContent = this.frames ? `${this.frames} fps · ${(this.bytes * 8 / 1e6).toFixed(1)} Mbps` : '';
       this.frames = 0; this.bytes = 0;
+      if (this.authenticatedAt && !this.lastFrame && Date.now() - this.authenticatedAt > 15000)
+        this.status.textContent = 'Connected to Windows, but capture has not produced a video frame. Desktop control is disabled.';
       // A still desktop legitimately produces no delta frames. Use RustDesk's
       // authenticated heartbeat for liveness, not changing pixels.
       if (this.lastFrame && Date.now() - this.lastPacket > 5000) {
@@ -265,6 +267,12 @@ export class Viewer {
       const peer = message.loginResponse.peerInfo;
       if (!peer?.displays?.length) throw Error('The endpoint reported no capturable displays');
       this.displays = peer.displays; this.displayIndex = peer.currentDisplay || 0;
+      this.authenticatedAt = Date.now();
+      if (peer.windowsSessions) {
+        // Some Windows hosts wait for confirmation before subscribing video.
+        // Confirm only the session selected by the endpoint, never switch users.
+        this.send({misc:{selectedSid:peer.windowsSessions.currentSid || 0}});
+      }
       this.monitor.replaceChildren(...peer.displays.map((d, i) => {
         const o = element('option', `${d.name || `Monitor ${i+1}`} · ${d.width}×${d.height}`); o.value = i; return o;
       }));

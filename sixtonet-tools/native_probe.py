@@ -120,7 +120,8 @@ def probe(engine, deps):
     deadline = time.time() + 55  # leave five seconds for bounded process cleanup
     nonce, password = secrets.token_hex(32), secrets.token_hex(32)
     result = {"engine": "rustdesk", "view_only": True, "saved_media": False,
-              "authenticated": False, "displays": [], "vp9_frame_bytes": []}
+              "authenticated": False, "displays": [], "vp9_frame_bytes": [],
+              "message_fields": {}, "video_fields": [], "misc_fields": []}
     with socket.socket() as listener:
         listener.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
         listener.bind(("127.0.0.1", 0))
@@ -160,6 +161,8 @@ def probe(engine, deps):
                     continue
                 received += 1
                 message = fields(cipher.decrypt(encrypted, received.to_bytes(24, "little")))
+                for field in message:
+                    result["message_fields"][field] = result["message_fields"].get(field, 0) + 1
                 if 9 in message:
                     challenge = fields(one(message, 9))
                     h1 = hashlib.sha256(password.encode() + one(challenge, 1)).digest()
@@ -179,10 +182,19 @@ def probe(engine, deps):
                     result["authenticated"] = True
                     result["displays"] = [{"width": one(fields(d), 3, 0), "height": one(fields(d), 4, 0)}
                                           for d in peer.get(4, [])]
+                    result["current_display"] = one(peer, 5, 0)
+                    if 13 in peer:
+                        sessions = fields(one(peer, 13))
+                        current_sid = one(sessions, 2, 0)
+                        result["current_windows_session"] = current_sid
+                        # Acknowledge the endpoint's existing user session;
+                        # never ask it to switch to another Windows session.
+                        send(blob(19, integer(35, current_sid)))
                 if 5 in message:
                     send(blob(5, one(message, 5)))
                 if 6 in message:
                     video = fields(one(message, 6))
+                    result["video_fields"] = sorted(set(result["video_fields"]) | set(video))
                     if 6 in video:
                         frames = fields(one(video, 6)).get(1, [])
                         result["vp9_frame_bytes"].extend(len(one(fields(frame), 1)) for frame in frames)
@@ -191,6 +203,7 @@ def probe(engine, deps):
                         break
                 if 19 in message:
                     misc = fields(one(message, 19))
+                    result["misc_fields"] = sorted(set(result["misc_fields"]) | set(misc))
                     if 9 in misc:
                         result["error"] = one(misc, 9).decode(errors="replace")[:300]
                         break

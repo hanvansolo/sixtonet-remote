@@ -19,6 +19,7 @@ test('real browser decrypts VP9 inter-frames, gates input and releases held keys
   await expect(page.getByText('RustDesk engine · source',{exact:true})).toHaveCount(0);
   await page.getByRole('button',{name:'Start desktop'}).click();
   await expect(page.getByText('Live · view only',{exact:true})).toBeVisible({timeout:15000});
+  expect(await page.evaluate(()=>observed.selectedSessions)).toEqual([2]);
   const c=page.locator('canvas');
   await c.click({position:{x:500,y:250}});
   expect(await page.evaluate(()=>observed.mouse.length)).toBe(0);

@@ -7,7 +7,7 @@ import {hbb} from '../protocol.js';
 let ws, nativeKey, sent=0n, received=0n;
 const sign = nacl.sign.keyPair(), box = nacl.box.keyPair();
 const password = 'a'.repeat(64);
-window.observed = {keys:[],mouse:[],clipboard:[],closed:false,commands:[],codecErrors:[],localReads:0,localWrites:[]};
+window.observed = {keys:[],mouse:[],clipboard:[],selectedSessions:[],closed:false,commands:[],codecErrors:[],localReads:0,localWrites:[]};
 Object.defineProperty(navigator,'clipboard',{value:{
   readText:async()=>{observed.localReads++;return 'Local £ clipboard';},
   writeText:async text=>{observed.localWrites.push(text);}
@@ -36,8 +36,12 @@ class FakeSocket extends EventTarget {
     const msg=hbb.Message.decode(nacl.secretbox.open(data,nonce(++received),nativeKey));
     if(msg.loginRequest) {
       send({loginResponse:{peerInfo:{version:'1.4.9',platform:'Windows',
-        displays:[{x:0,y:0,width:960,height:540,name:'Synthetic display'}],currentDisplay:0}}});
-      video().catch(e=>window.observed.codecErrors.push(e.message));
+        displays:[{x:0,y:0,width:960,height:540,name:'Synthetic display'}],currentDisplay:0,
+        windowsSessions:{currentSid:2,sessions:[{sid:1,name:'Console'},{sid:2,name:'Active user'}]}}}});
+    }
+    if (msg.misc && Object.hasOwn(msg.misc,'selectedSid')) {
+      window.observed.selectedSessions.push(msg.misc.selectedSid);
+      if (msg.misc.selectedSid === 2) video().catch(e=>window.observed.codecErrors.push(e.message));
     }
     if(msg.keyEvent) window.observed.keys.push({...msg.keyEvent, down:msg.keyEvent.down});
     if(msg.mouseEvent) window.observed.mouse.push({...msg.mouseEvent});
