@@ -133,7 +133,6 @@ export class Viewer {
     this.releaseInput(); this.popup = popup;
     const doc = popup.document;
     doc.title = this.title;
-    const base = doc.createElement('base'); base.href = document.baseURI; doc.head.append(base);
     for (const sheet of document.styleSheets) {
       if (sheet.disabled) continue;
       try {

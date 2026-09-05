@@ -6,10 +6,12 @@ test('real browser decrypts VP9 inter-frames, gates input and releases held keys
   page.on('pageerror',e=>errors.push(e.message));
   await page.route('https://desktop.test/**',route=>{
     const script=route.request().url().endsWith('fixture.js');
-    return route.fulfill({status:200,contentType:script?'application/javascript':'text/html',
-      headers:{'Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'"},
-      body:script?readFileSync('dist/browser-fixture.js'):
-        '<!doctype html><html><head><meta charset="utf-8"><title>SixtoNet desktop test</title><style>body{background:#202128;color:white;font:16px sans-serif;margin:24px}.card-head{display:flex;gap:8px;align-items:center}canvas{width:100%;height:auto}button,select{padding:8px;background:#343544;color:white;border:1px solid #555;border-radius:5px}.sub{color:#aaa}a{color:#aaa}</style></head><body><h1>Remote Desktop — protocol test</h1><div id="viewer"></div><script src="/fixture.js"></script></body></html>'});
+    const css=route.request().url().endsWith('style.css');
+    return route.fulfill({status:200,contentType:script?'application/javascript':css?'text/css':'text/html',
+      headers:{'Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; connect-src 'self'"},
+      body:script?readFileSync('dist/browser-fixture.js'):css?
+        'body{background:#202128;color:white;font:16px sans-serif;margin:24px}.card-head{display:flex;flex-wrap:wrap;gap:8px;align-items:center}canvas{width:100%;height:auto}button,select{padding:8px;background:#343544;color:white;border:1px solid #555;border-radius:5px}.sub{color:#aaa}a{color:#aaa}':
+        '<!doctype html><html><head><meta charset="utf-8"><title>SixtoNet desktop test</title><link rel="stylesheet" href="/style.css"></head><body><h1>Remote Desktop — protocol test</h1><div id="viewer"></div><script src="/fixture.js"></script></body></html>'});
   });
   await page.goto('https://desktop.test/');
   await expect(page.getByRole('link',{name:'Open-source licences',exact:true})).toHaveAttribute('href',
