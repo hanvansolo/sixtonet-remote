@@ -65,6 +65,8 @@ export class Viewer {
     this.held = new Map(); this.buttons = new Set(); this.lastFrame = 0; this.lastPacket = 0;
     this.displays = []; this.displayIndex = 0; this.frames = 0; this.bytes = 0;
     this.events = new AbortController(); this.pending = 0;
+    this.decodeTimes = new Map(); this.targetFps = 30; this.lastPressure = 0;
+    this.lastRateChange = 0; this.recoveries = 0; this.presented = 0;
     const head = element('div', '', 'card-head');
     this.startButton = iconButton('Start desktop', 'M8 5l11 7-11 7Z', 'primary');
     this.controlButton = iconButton('Take control', 'M4 3l6 17 3-7 7-3Z M13 13l6 6');
@@ -78,11 +80,11 @@ export class Viewer {
     const disconnect = iconButton('Disconnect desktop', 'M12 3v9 M6 5a9 9 0 1 0 12 0', 'danger');
     const sas = iconButton('Ctrl+Alt+Delete', 'M3 5h18v14H3Z M7 9h.01 M11 9h.01 M15 9h.01 M7 13h.01 M11 13h.01 M15 13h2 M7 16h10');
     sas.disabled = !input;
-    const quality = element('select', '', 'sel'); quality.setAttribute('aria-label', 'Stream quality');
+    const quality = this.quality = element('select', '', 'sel'); quality.setAttribute('aria-label', 'Stream quality');
     for (const [v,t] of [[2,'Low bandwidth'],[3,'Balanced'],[4,'Best quality']]) {
       const o = element('option',t); o.value = v; quality.append(o);
     }
-    quality.value = '3';
+    quality.value = '4';
     this.status = element('p', 'Ready to start an encrypted desktop stream.', 'sub');
     this.stats = element('span', '', 'sub');
     this.clipStatus = element('p', clipboard ? 'Text clipboard sharing is enabled. Paste here with Ctrl+V; copy remote text with the button.' :
@@ -119,10 +121,11 @@ export class Viewer {
     on(paste, 'click', () => this.pasteLocal());
     on(this.copy, 'click', () => this.copyRemote());
     on(sas, 'click', () => { if (this.canInput()) this.send({keyEvent:{controlKey:CK.CtrlAltDel, press:true}}); });
-    on(quality, 'change', () => this.send({misc:{option:{imageQuality:Number(quality.value)}}}));
+    on(quality, 'change', () => this.send({misc:{option:{imageQuality:Number(quality.value),customFps:this.targetFps}}}));
     on(this.monitor, 'change', () => {
       this.releaseInput(); this.lastFrame = 0; this.displayIndex = Number(this.monitor.value);
-      this.decoder?.reset(); this.configureDecoder();
+      this.clearPresentation(); this.decodeTimes.clear();
+      this.decoder?.reset(); if (this.decoder) this.configureDecoder();
       this.send({misc:{switchDisplay:{display:this.displayIndex}}});
     });
     this.inputEvents(on);
@@ -133,6 +136,11 @@ export class Viewer {
       if (!root.isConnected) { this.close(); return; }
       this.stats.textContent = this.frames ? `${this.frames} fps · ${(this.bytes * 8 / 1e6).toFixed(1)} Mbps` : '';
       this.frames = 0; this.bytes = 0;
+      // Restore FPS slowly after decoder pressure subsides; preserve the
+      // user's image-quality choice rather than making text blurrier.
+      if (this.authenticatedAt && this.targetFps < 30 && performance.now() - this.lastPressure > 8000 &&
+          performance.now() - this.lastRateChange > 3000 && this.decodeTimes.size < 2)
+        this.setFrameRate(Math.min(30,this.targetFps + 5));
       if (this.authenticatedAt && !this.lastFrame && Date.now() - this.authenticatedAt > 15000)
         this.status.textContent = 'Connected to Windows, but capture has not produced a video frame. Desktop control is disabled.';
       // A still desktop legitimately produces no delta frames. Use RustDesk's
@@ -152,7 +160,7 @@ export class Viewer {
     if (this.popup && !this.popup.closed) { this.popup.focus(); return; }
     const popup = window.open('', '', 'popup=yes,width=1400,height=900,resizable=yes,scrollbars=yes');
     if (!popup) { this.clipStatus.textContent = 'Allow pop-ups for this site, then try Pop out again.'; return; }
-    this.releaseInput(); this.popup = popup;
+    this.releaseInput(); this.clearPresentation(); this.popup = popup;
     const doc = popup.document;
     doc.title = this.title;
     for (const sheet of document.styleSheets) {
@@ -185,7 +193,7 @@ export class Viewer {
   returnToTab() {
     const popup = this.popup;
     if (!popup) return;
-    this.popup = null; this.releaseInput();
+    this.popup = null; this.releaseInput(); this.clearPresentation();
     this.popoutButton.hidden = false;
     this.placeholder?.remove();
     if (this.anchor?.isConnected) this.anchor.replaceWith(this.root);
@@ -227,12 +235,8 @@ export class Viewer {
     this.startButton.disabled = true; this.status.textContent = 'Connecting to the endpoint desktop engine…';
     this.decoder = new VideoDecoder({output: frame => {
       if (this.closed) { frame.close(); return; }
-      if (this.canvas.width !== frame.displayWidth) this.canvas.width = frame.displayWidth;
-      if (this.canvas.height !== frame.displayHeight) this.canvas.height = frame.displayHeight;
-      this.canvas.getContext('2d', {alpha:false}).drawImage(frame, 0, 0); frame.close();
-      this.canvas.hidden = false; this.lastFrame = Date.now(); this.frames++;
-      this.controlButton.disabled = !this.allowInput;
-      this.status.textContent = this.control ? 'Live · you have mouse and keyboard control' : 'Live · view only';
+      this.decodeTimes.delete(frame.timestamp);
+      this.queuePresentation(frame);
     }, error: () => this.fail('The browser video decoder failed. End and reopen the desktop.')});
     this.configureDecoder();
     this.ws = new WebSocket(this.url); this.ws.binaryType = 'arraybuffer';
@@ -257,6 +261,63 @@ export class Viewer {
     this.decoder.configure({codec:'vp09.00.10.08', optimizeForLatency:true, hardwareAcceleration:'no-preference'});
     this.needKey = true;
   }
+  clearPresentation() {
+    if (this.paintWindow && this.paintRequest != null) this.paintWindow.cancelAnimationFrame(this.paintRequest);
+    this.paintRequest = null; this.paintWindow = null;
+    this.latestFrame?.close(); this.latestFrame = null;
+  }
+  queuePresentation(frame) {
+    // Discard only decoded images, never encoded inter-frame references. Hold
+    // one image for the visible window's next repaint, including in a pop-out.
+    this.latestFrame?.close(); this.latestFrame = frame;
+    if (this.paintRequest != null) return;
+    this.paintWindow = this.root.ownerDocument.defaultView;
+    this.paintRequest = this.paintWindow.requestAnimationFrame(() => {
+      this.paintRequest = null;
+      const image = this.latestFrame; this.latestFrame = null;
+      if (!image) return;
+      try {
+        if (this.closed) return;
+        if (this.canvas.width !== image.displayWidth) this.canvas.width = image.displayWidth;
+        if (this.canvas.height !== image.displayHeight) this.canvas.height = image.displayHeight;
+        this.canvas.getContext('2d', {alpha:false}).drawImage(image, 0, 0);
+        this.canvas.hidden = false; this.lastFrame = Date.now(); this.frames++; this.presented++;
+        this.controlButton.disabled = !this.allowInput;
+        this.status.textContent = this.control ? 'Live · you have mouse and keyboard control' : 'Live · view only';
+      } finally { image.close(); }
+    });
+  }
+  setFrameRate(fps) {
+    if (fps === this.targetFps) return;
+    this.targetFps = fps; this.lastRateChange = performance.now();
+    this.send({misc:{option:{customFps:fps}}});
+  }
+  decodeVideo(frame) {
+    if (this.needKey && !frame.key) return;
+    const now = performance.now();
+    const oldest = this.decodeTimes.values().next().value;
+    if (this.decodeTimes.size >= 4 || this.decoder.decodeQueueSize >= 4) {
+      this.lastPressure = now;
+      if (now - this.lastRateChange > 1000) this.setFrameRate(Math.max(10,Math.floor(this.targetFps / 2)));
+    }
+    // A short burst is not corruption. Recover at a keyframe only after the
+    // latency or queue budget is exhausted, instead of repeatedly resetting.
+    if (this.decodeTimes.size >= 20 || this.decoder.decodeQueueSize >= 20 || (oldest != null && now - oldest > 500)) {
+      this.releaseInput(); this.control = false; this.lastFrame = 0;
+      this.controlButton.disabled = true; buttonLabel(this.controlButton,'Take control');
+      this.controlButton.setAttribute('aria-pressed','false'); this.controlButton.classList.remove('primary');
+      this.clearPresentation(); this.decodeTimes.clear();
+      this.decoder.reset(); this.configureDecoder(); this.recoveries++;
+      this.status.textContent = 'Recovering the desktop stream; waiting for a complete frame.';
+      this.setFrameRate(10);
+      this.send({misc:{refreshVideo:true}});
+      if (!frame.key) return;
+    }
+    this.needKey = false;
+    const timestamp = Number(frame.pts) * 1000;
+    this.decodeTimes.set(timestamp,now);
+    this.decoder.decode(new EncodedVideoChunk({type:frame.key ? 'key' : 'delta',timestamp,data:frame.data}));
+  }
   async receive(data) {
     if (this.closed) return;
     if (typeof data === 'string') {
@@ -279,8 +340,10 @@ export class Viewer {
       const password = await passwordResponse(this.identity.password, message.hash.salt, message.hash.challenge);
       this.identity.password = '';
       this.send({loginRequest:{username:this.identity.id, password, myId:'sixtonet-browser',
-        myName:'SixtoNet browser operator', version:'1.4.9', myPlatform:'Web', videoAckRequired:true,
-        option:{imageQuality:3, customFps:30, disableAudio:2, disableClipboard:this.allowClipboard ? 1 : 2,
+        // Native transport backpressure replaces the per-frame browser round
+        // trip. Decoder pressure feeds back a bounded frame-rate request.
+        myName:'SixtoNet browser operator', version:'1.4.9', myPlatform:'Web', videoAckRequired:false,
+        option:{imageQuality:Number(this.quality.value), customFps:this.targetFps, disableAudio:2, disableClipboard:this.allowClipboard ? 1 : 2,
           enableFileTransfer:1, disableKeyboard:this.allowInput ? 1 : 2, showRemoteCursor:2,
           supportedDecoding:{abilityVp9:1, prefer:1}}}});
     }
@@ -333,22 +396,10 @@ export class Viewer {
     if (message.videoFrame) {
       const video = message.videoFrame;
       if ((video.display || 0) !== this.displayIndex) {
-        this.send({misc:{videoReceived:true}}); return;
+        return;
       }
       if (!video.vp9s) throw Error('The endpoint selected a codec this browser viewer did not negotiate');
-      for (const frame of video.vp9s.frames) {
-        if (this.needKey && !frame.key) continue;
-        if (this.decoder.decodeQueueSize > 6) {
-          // Decode backlog must recover at an actual key frame, never by
-          // presenting dependent delta frames after dropping their references.
-          this.decoder.reset(); this.configureDecoder();
-          this.send({misc:{refreshVideo:true}}); break;
-        }
-        this.needKey = false;
-        this.decoder.decode(new EncodedVideoChunk({type:frame.key ? 'key' : 'delta',
-          timestamp:Number(frame.pts) * 1000, data:frame.data}));
-      }
-      this.send({misc:{videoReceived:true}});
+      for (const frame of video.vp9s.frames) this.decodeVideo(frame);
     }
   }
   send(message) {
@@ -414,6 +465,7 @@ export class Viewer {
     this.releaseInput(); this.closed = true;
     this.remoteClipboard = null; this.copy.disabled = true;
     clearInterval(this.timer); this.events.abort();
+    this.clearPresentation(); this.decodeTimes.clear();
     this.ws?.close(); if (this.decoder?.state !== 'closed') this.decoder?.close();
     this.cipher.close(); if (this.identity) this.identity.password = '';
     this.controlButton.disabled = true; this.startButton.disabled = true;

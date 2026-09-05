@@ -69,3 +69,25 @@ Release gates: successful Windows build; lab capture/input including lock/UAC an
 disconnect tests; visible endpoint session indication; signed release artifacts;
 agent bundle checksum/preflight and canary validation. Until those gates pass,
 the adapter is an unsigned test artifact, not a customer rollout.
+
+### Browser pacing correction — 5 September 2026
+
+The browser requests native transport backpressure (`video_ack_required=false`),
+instead of gating every frame on an end-to-end browser acknowledgement. It does
+not send redundant video acknowledgements in this mode. No native rebuild is
+required: this is the existing server's non-web-ACK path.
+
+Decoded images are coalesced into one pending image and painted on the visible
+window's animation frame (including the pop-out). All encoded reference frames
+are decoded in order. Four outstanding decodes lower requested FPS; short bursts
+do not reset the decoder. A 20-frame or 500 ms decode budget triggers bounded
+keyframe recovery and suspends input until an image is presented. FPS recovers
+gradually after pressure clears. Pending images are closed on replacement,
+window changes and teardown. Best quality is the initial choice, and a quality
+selected before connection now survives login.
+
+Synthetic Edge tests cover encrypted inter-frames, 150 ms simulated relay RTT,
+quality selection, clipboard, input and pop-out; unit tests cover decoder
+backpressure/recovery and image lifetime. These tests are not endpoint capture,
+hardware-encoding or visual-artifact acceptance tests. This release still uses
+software VP9 / 4:2:0; it does not add hardware encoding or lossless text mode.

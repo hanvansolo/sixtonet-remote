@@ -100,3 +100,32 @@ test('clipboard uses explicit grant and gestures; no automatic local reads or wr
   await page.evaluate(()=>viewer.close());
   expect(await page.evaluate(()=>viewer.remoteClipboard)).toBeNull();
 });
+
+test('quality survives connection and a delayed relay no longer serialises each video frame',async({page})=>{
+  await page.route('https://desktop.test/**',route=>route.fulfill({status:200,
+    contentType:route.request().url().endsWith('fixture.js')?'application/javascript':'text/html',
+    body:route.request().url().endsWith('fixture.js')?readFileSync('dist/browser-fixture.js'):
+      '<!doctype html><div id="viewer"></div><script src="/fixture.js"></script>'}));
+  await page.goto('https://desktop.test/?lag=75');
+  await expect(page.getByLabel('Stream quality')).toHaveValue('4');
+  await page.getByLabel('Stream quality').selectOption('2');
+  await page.getByRole('button',{name:'Start desktop'}).click();
+  await expect(page.getByText('Live · view only',{exact:true})).toBeVisible({timeout:15000});
+  expect(await page.evaluate(()=>observed.login)).toEqual({videoAckRequired:false,imageQuality:2});
+  const before=await page.evaluate(()=>({count:viewer.presented,at:performance.now()}));
+  await expect.poll(()=>page.evaluate(()=>viewer.presented),{timeout:4000}).toBeGreaterThan(before.count+30);
+  const sample=await page.evaluate(()=>({count:viewer.presented,at:performance.now(),resets:viewer.recoveries}));
+  const fps=(sample.count-before.count)*1000/(sample.at-before.at);
+  expect(fps).toBeGreaterThan(12); // Stop-and-wait at 150ms RTT cannot exceed ~6.7fps.
+  expect(sample.resets).toBe(0);
+  console.log(`Delayed synthetic relay (150ms RTT): ${fps.toFixed(1)} presented fps, ${sample.resets} recoveries`);
+  await page.getByLabel('Stream quality').selectOption('4');
+  await expect.poll(()=>page.evaluate(()=>observed.options.some(o=>o.imageQuality===4))).toBe(true);
+  const popupPromise=page.waitForEvent('popup');
+  await page.getByRole('button',{name:'Pop out',exact:true}).click();
+  const popup=await popupPromise;
+  await expect.poll(()=>page.evaluate(()=>viewer.paintWindow===viewer.popup)).toBe(true);
+  await expect(popup.locator('canvas')).toBeVisible();
+  await page.evaluate(()=>viewer.close());
+  expect(await page.evaluate(()=>({pending:viewer.latestFrame,decode:viewer.decodeTimes.size}))).toEqual({pending:null,decode:0});
+});
