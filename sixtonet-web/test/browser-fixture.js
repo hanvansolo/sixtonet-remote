@@ -7,7 +7,12 @@ import {hbb} from '../protocol.js';
 let ws, nativeKey, sent=0n, received=0n;
 const sign = nacl.sign.keyPair(), box = nacl.box.keyPair();
 const password = 'a'.repeat(64);
-window.observed = {keys:[],mouse:[],closed:false,commands:[],codecErrors:[]};
+window.observed = {keys:[],mouse:[],clipboard:[],closed:false,commands:[],codecErrors:[],localReads:0,localWrites:[]};
+Object.defineProperty(navigator,'clipboard',{value:{
+  readText:async()=>{observed.localReads++;return 'Local £ clipboard';},
+  writeText:async text=>{observed.localWrites.push(text);}
+}});
+window.sendRemoteClipboard = (text, extra={}) => send({clipboard:{format:0,content:new TextEncoder().encode(text),...extra}});
 function deliver(data) {
   const event = new MessageEvent('message', {data:typeof data === 'string' ? data : data.buffer.slice(data.byteOffset,data.byteOffset+data.byteLength)});
   ws.onmessage?.(event);
@@ -36,6 +41,7 @@ class FakeSocket extends EventTarget {
     }
     if(msg.keyEvent) window.observed.keys.push({...msg.keyEvent, down:msg.keyEvent.down});
     if(msg.mouseEvent) window.observed.mouse.push({...msg.mouseEvent});
+    if(msg.clipboard) window.observed.clipboard.push(new TextDecoder().decode(msg.clipboard.content));
   }
   close() {this.readyState=3; window.observed.closed=true;}
 }
@@ -59,6 +65,7 @@ async function video() {
   },67);
 }
 window.viewer=new Viewer(document.querySelector('#viewer'),{url:'wss://localhost/test',input:true,
+  clipboard:new URL(location.href).searchParams.has('clipboard'),
   exec:async kind=> {
     window.observed.commands.push(kind);
     if(kind==='desktop_open') {

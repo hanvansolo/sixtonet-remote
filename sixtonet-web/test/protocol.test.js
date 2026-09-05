@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import nacl from 'tweetnacl';
 import {createHash} from 'node:crypto';
 import {Cipher, nonce, passwordResponse} from '../crypto.js';
-import {pointerPosition} from '../viewer.js';
+import {pointerPosition, keyboardEvent} from '../viewer.js';
 import {hbb} from '../protocol.js';
 
 function handshake() {
@@ -12,6 +12,21 @@ function handshake() {
   const signed = nacl.sign(hbb.IdPk.encode({id, pk:box.publicKey}).finish(), sign.secretKey);
   return {sign, box, id, signed, identity:{id, public_key:[...sign.publicKey]}};
 }
+
+test('translated typing preserves exact case, layout characters and Unicode without duplicate keyups', () => {
+  for (const key of [...'aA1!@"£# é👋']) {
+    const event = {key, shiftKey:key === 'A'};
+    const message = keyboardEvent(event, true);
+    const wire = hbb.Message.decode(hbb.Message.encode({keyEvent:message}).finish()).keyEvent;
+    assert.equal(wire.unicode, key.codePointAt(0));
+    assert.deepEqual(message.modifiers, []);
+    assert.equal(keyboardEvent(event, false), null);
+  }
+  assert.equal(keyboardEvent({key:'@', ctrlKey:true, altKey:true, getModifierState:()=>true},true).unicode,64);
+  assert.equal(keyboardEvent({key:'Dead'},true),null);
+  assert.equal(keyboardEvent({key:'Enter'},true).controlKey,hbb.ControlKey.Return);
+  assert.equal(keyboardEvent({key:'C',ctrlKey:true,shiftKey:true},true).chr,99);
+});
 test('encrypted browser/native handshake and independent monotonic counters', () => {
   const native = handshake(), c = new Cipher();
   const response = hbb.Message.decode(c.handshake(native.signed, native.identity)).publicKey;

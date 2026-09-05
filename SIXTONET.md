@@ -50,8 +50,15 @@ Run `npm ci`, `npm test`, and `npm run build` in that directory. The generated
 notice. The source here plus the recursively pinned native submodules and build
 workflow are the reproducible source for this component.
 
-Preview scope: video, monitor selection, fullscreen, quality, mouse and keyboard.
-Not yet implemented/verified in the browser: audio, clipboard sync, native file
+Preview scope: video, monitor selection, fullscreen, quality, mouse and keyboard,
+exact Unicode character typing, fit/actual size, and a browser pop-out that retains
+the existing encrypted connection. Keep the dashboard open; closing it ends the
+pop-out too. Text clipboard sharing is separately granted in the session dialog:
+Ctrl+V or Paste local clipboard sends local text; Copy remote clipboard retrieves
+received text using a browser clipboard-write gesture. No background local clipboard
+reads/writes, rich clipboard formats, or clipboard logging. Native acceptance of
+the text clipboard/session-selection changes still requires the canary checks.
+Not yet implemented/verified in the browser: audio, native file
 transfer, chat, recording, privacy mode, remote printing, tunnelling, wake-on-LAN,
 reboot/reconnect, mobile control, cross-platform agents and all display/session
 transition cases. Do not describe retaining those upstream sources as delivering

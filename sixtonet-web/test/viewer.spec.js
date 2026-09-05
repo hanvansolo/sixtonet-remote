@@ -29,7 +29,56 @@ test('real browser decrypts VP9 inter-frames, gates input and releases held keys
   expect(seen.mouse.some(m=>(m.mask&7)===1)).toBe(true);
   expect(seen.keys.some(k=>k.controlKey===4 && k.down===false), JSON.stringify(seen.keys)).toBe(true);
   expect(seen.codecErrors).toEqual([]);expect(errors).toEqual([]);
+  await page.keyboard.up('Control');
+  await page.getByRole('button',{name:'Take control',exact:true}).click();
+  await page.keyboard.press('A');
+  await page.keyboard.press('!');
+  const typed = await page.evaluate(()=>observed.keys.filter(k=>k.unicode).map(k=>k.unicode));
+  expect(typed).toEqual([65,33]);
+  await page.evaluate(()=>sendRemoteClipboard('MUST NOT READ'));
+  await expect(page.getByRole('button',{name:'Copy remote clipboard'})).toBeDisabled();
+  expect(await page.evaluate(()=>viewer.remoteClipboard)).toBeNull();
+  const popupPromise=page.waitForEvent('popup');
+  await page.getByRole('button',{name:'Pop out',exact:true}).click();
+  const popup=await popupPromise;
+  await expect(popup.locator('canvas')).toBeVisible();
+  await popup.locator('canvas').focus();
+  await popup.keyboard.press('Z');
+  expect(await page.evaluate(()=>observed.keys.some(k=>k.unicode===90))).toBe(true);
+  expect(await page.evaluate(()=>observed.commands.filter(c=>c==='desktop_open').length)).toBe(1);
+  await page.getByRole('button',{name:'Return desktop to this tab'}).click();
+  await expect(c).toBeVisible();
+  expect(await page.evaluate(()=>viewer.closed)).toBe(false);
   await page.screenshot({path:'test-results/viewer.png',fullPage:true});
   await page.evaluate(()=>viewer.close());
   expect(await page.evaluate(()=>observed.closed)).toBe(true);
+});
+
+test('clipboard uses explicit grant and gestures; no automatic local reads or writes', async ({page})=>{
+  await page.route('https://desktop.test/**',route=>route.fulfill({status:200,
+    contentType:route.request().url().endsWith('fixture.js')?'application/javascript':'text/html',
+    body:route.request().url().endsWith('fixture.js')?readFileSync('dist/browser-fixture.js'):
+      '<!doctype html><div id="viewer"></div><script src="/fixture.js"></script>'}));
+  await page.goto('https://desktop.test/?clipboard');
+  await page.getByRole('button',{name:'Start desktop'}).click();
+  await expect(page.getByText('Live · view only',{exact:true})).toBeVisible({timeout:15000});
+  await page.evaluate(()=>sendRemoteClipboard('Remote MiXeD £ text'));
+  await expect(page.getByRole('button',{name:'Copy remote clipboard'})).toBeEnabled();
+  expect(await page.evaluate(()=>observed.localWrites)).toEqual([]);
+  expect(await page.evaluate(()=>observed.localReads)).toBe(0);
+  await page.getByRole('button',{name:'Copy remote clipboard'}).click();
+  expect(await page.evaluate(()=>observed.localWrites)).toEqual(['Remote MiXeD £ text']);
+  await page.getByRole('button',{name:'Take control',exact:true}).click();
+  await page.getByRole('button',{name:'Paste local clipboard'}).click();
+  expect(await page.evaluate(()=>observed.clipboard)).toEqual(['Local £ clipboard']);
+  expect(await page.evaluate(()=>observed.keys.some(k=>k.chr===118 && k.press))).toBe(true);
+  await page.locator('canvas').evaluate(c=>{
+    const data=new DataTransfer(); data.setData('text/plain','Pasted £ A');
+    c.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}));
+  });
+  expect(await page.evaluate(()=>observed.clipboard.at(-1))).toBe('Pasted £ A');
+  await page.evaluate(()=>sendRemoteClipboard('unsupported',{compress:true}));
+  await expect(page.getByRole('button',{name:'Copy remote clipboard'})).toBeDisabled();
+  await page.evaluate(()=>viewer.close());
+  expect(await page.evaluate(()=>viewer.remoteClipboard)).toBeNull();
 });

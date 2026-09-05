@@ -5,7 +5,7 @@ import { hbb } from './protocol.js';
 
 const CK = hbb.ControlKey;
 const keys = { Enter: CK.Return, ArrowLeft: CK.LeftArrow, ArrowRight: CK.RightArrow,
-  ArrowUp: CK.UpArrow, ArrowDown: CK.DownArrow, ' ': CK.Space,
+  ArrowUp: CK.UpArrow, ArrowDown: CK.DownArrow,
   ...Object.fromEntries(['Alt','Backspace','CapsLock','Control','Delete','End','Escape',
     'Home','Meta','PageDown','PageUp','Shift','Tab','Insert','Pause','NumLock',
     ...Array.from({length:12}, (_, i) => `F${i+1}`)].map(k => [k, CK[k]])) };
@@ -27,9 +27,24 @@ export function pointerPosition(event, rect, display) {
     Math.floor((event.clientY - rect.top) / rect.height * display.height)))};
 }
 
+// Translate printable text exactly once. Legacy virtual keys remain for
+// shortcuts/navigation, whose meaning is not a character to insert.
+export function keyboardEvent(e, down) {
+  const printable = [...e.key].length === 1;
+  const altGraph = e.getModifierState?.('AltGraph');
+  if (printable && (altGraph || !(e.ctrlKey || e.altKey || e.metaKey)))
+    return down ? {unicode:e.key.codePointAt(0), down:true, mode:0, modifiers:[]} : null;
+  const key = keys[e.key] !== undefined ? {controlKey:keys[e.key]} :
+    printable ? {chr:e.key.toLowerCase().codePointAt(0)} : null;
+  return key ? {...key, down, mode:0, modifiers:modifiers(e)} : null;
+}
+const MAX_CLIPBOARD = 1024 * 1024;
+
 export class Viewer {
-  constructor(root, {url, exec, input = false}) {
+  constructor(root, {url, exec, input = false, clipboard = false, title = 'SixtoNet Remote Desktop'}) {
     this.root = root; this.url = url; this.exec = exec; this.allowInput = input;
+    this.allowClipboard = clipboard; this.remoteClipboard = null; this.title = title;
+    root.classList.add('desktop-viewer');
     this.cipher = new Cipher(); this.closed = false; this.control = false;
     this.held = new Map(); this.buttons = new Set(); this.lastFrame = 0; this.lastPacket = 0;
     this.displays = []; this.displayIndex = 0; this.frames = 0; this.bytes = 0;
@@ -40,6 +55,9 @@ export class Viewer {
     this.controlButton.disabled = true;
     this.monitor = element('select', '', 'sel'); this.monitor.setAttribute('aria-label', 'Remote monitor');
     const full = element('button', 'Full screen', 'btn sm');
+    const popout = element('button', 'Pop out', 'btn sm');
+    const fit = element('button', 'Actual size', 'btn sm');
+    const disconnect = element('button', 'Disconnect desktop', 'btn sm');
     const sas = element('button', 'Ctrl+Alt+Delete', 'btn sm');
     sas.disabled = !input;
     const quality = element('select', '', 'sel'); quality.setAttribute('aria-label', 'Stream quality');
@@ -49,6 +67,11 @@ export class Viewer {
     quality.value = '3';
     this.status = element('p', 'Ready to start an encrypted desktop stream.', 'sub');
     this.stats = element('span', '', 'sub');
+    this.clipStatus = element('p', clipboard ? 'Text clipboard sharing is enabled. Paste here with Ctrl+V; copy remote text with the button.' :
+      'Two-way clipboard is off. Enable it when opening the live session.', 'sub');
+    const paste = element('button', 'Paste local clipboard', 'btn sm');
+    this.copy = element('button', 'Copy remote clipboard', 'btn sm');
+    paste.disabled = !clipboard || !input; this.copy.disabled = true;
     this.stage = element('div', '', 'desktop-stage');
     this.canvas = element('canvas'); this.canvas.tabIndex = 0;
     this.canvas.setAttribute('aria-label', 'Remote desktop. Take control to use mouse and keyboard.');
@@ -56,8 +79,8 @@ export class Viewer {
     const source = element('a', 'Open-source licences');
     source.href = 'https://github.com/hanvansolo/sixtonet-remote/tree/sixtonet';
     source.target = '_blank'; source.rel = 'noopener noreferrer'; source.className = 'sub';
-    head.append(this.startButton, this.controlButton, this.monitor, quality, full, sas, this.stats);
-    root.append(head, this.status, this.stage, source);
+    head.append(this.startButton, this.controlButton, this.monitor, quality, popout, full, fit, sas, paste, this.copy, disconnect, this.stats);
+    root.append(head, this.status, this.clipStatus, this.stage, source);
     const on = (el, name, fn) => el.addEventListener(name, fn, {signal:this.events.signal});
     on(this.startButton, 'click', () => this.start().catch(e => this.fail(e.message)));
     on(this.controlButton, 'click', () => {
@@ -66,7 +89,18 @@ export class Viewer {
       this.controlButton.classList.toggle('primary', this.control);
       if (this.control) this.canvas.focus();
     });
-    on(full, 'click', () => this.stage.requestFullscreen().catch(() => {}));
+    on(full, 'click', () => {
+      const doc = root.ownerDocument;
+      (doc.fullscreenElement ? doc.exitFullscreen() : root.requestFullscreen()).catch(() => {});
+    });
+    on(popout, 'click', () => this.popOut());
+    on(fit, 'click', () => {
+      const actual = this.stage.classList.toggle('actual-size');
+      fit.textContent = actual ? 'Fit to window' : 'Actual size';
+    });
+    on(disconnect, 'click', () => { this.status.textContent = 'Desktop disconnected.'; this.close(); });
+    on(paste, 'click', () => this.pasteLocal());
+    on(this.copy, 'click', () => this.copyRemote());
     on(sas, 'click', () => { if (this.canInput()) this.send({keyEvent:{controlKey:CK.CtrlAltDel, press:true}}); });
     on(quality, 'change', () => this.send({misc:{option:{imageQuality:Number(quality.value)}}}));
     on(this.monitor, 'change', () => {
@@ -76,7 +110,8 @@ export class Viewer {
     });
     this.inputEvents(on);
     on(window, 'blur', () => this.releaseInput());
-    on(document, 'visibilitychange', () => { if (document.hidden) this.releaseInput(); });
+    on(window, 'pagehide', () => this.close());
+    on(document, 'visibilitychange', () => { if (root.ownerDocument === document && document.hidden) this.releaseInput(); });
     this.timer = setInterval(() => {
       if (!root.isConnected) { this.close(); return; }
       this.stats.textContent = this.frames ? `${this.frames} fps · ${(this.bytes * 8 / 1e6).toFixed(1)} Mbps` : '';
@@ -88,6 +123,62 @@ export class Viewer {
         this.status.textContent = 'Waiting for the next desktop frame; control is suspended.';
       }
     }, 1000);
+  }
+
+  popOut() {
+    if (this.closed) return;
+    if (this.popup && !this.popup.closed) { this.popup.focus(); return; }
+    const popup = window.open('', '', 'popup=yes,width=1400,height=900,resizable=yes,scrollbars=yes');
+    if (!popup) { this.clipStatus.textContent = 'Allow pop-ups for this site, then try Pop out again.'; return; }
+    this.releaseInput(); this.popup = popup;
+    const doc = popup.document;
+    doc.title = this.title;
+    const base = doc.createElement('base'); base.href = document.baseURI; doc.head.append(base);
+    for (const style of document.querySelectorAll('link[rel="stylesheet"],style')) doc.head.append(style.cloneNode(true));
+    doc.body.className = 'desktop-popout';
+    this.anchor = document.createComment('desktop pop-out return point');
+    this.root.before(this.anchor);
+    this.placeholder = element('button', 'Return desktop to this tab', 'btn');
+    this.anchor.before(this.placeholder);
+    this.placeholder.addEventListener('click', () => this.returnToTab(), {signal:this.events.signal});
+    doc.body.append(this.root);
+    popup.addEventListener('blur', () => this.releaseInput(), {signal:this.events.signal});
+    popup.addEventListener('pagehide', () => this.returnToTab(), {signal:this.events.signal});
+    doc.addEventListener('visibilitychange', () => { if (doc.hidden) this.releaseInput(); }, {signal:this.events.signal});
+    this.canvas.focus();
+  }
+  returnToTab() {
+    const popup = this.popup;
+    if (!popup) return;
+    this.popup = null; this.releaseInput();
+    this.placeholder?.remove();
+    if (this.anchor?.isConnected) this.anchor.replaceWith(this.root);
+    else this.close();
+    if (!popup.closed) popup.close();
+  }
+  pasteText(text) {
+    if (!this.allowClipboard || !this.canInput()) {
+      this.clipStatus.textContent = 'Take control before pasting, with two-way clipboard permission enabled.'; return;
+    }
+    const content = new TextEncoder().encode(text);
+    if (content.length > MAX_CLIPBOARD) { this.clipStatus.textContent = 'Text clipboard is limited to 1 MiB.'; return; }
+    this.releaseInput();
+    this.send({clipboard:{content, compress:false, format:0}});
+    this.send({keyEvent:{chr:118, press:true, modifiers:[CK.Control], mode:0}});
+    this.clipStatus.textContent = 'Text sent to the remote clipboard and pasted.';
+    this.canvas.focus();
+  }
+  async pasteLocal() {
+    if (!this.allowClipboard || !this.canInput()) { this.pasteText(''); return; }
+    try { this.pasteText(await this.root.ownerDocument.defaultView.navigator.clipboard.readText()); }
+    catch { this.clipStatus.textContent = 'Browser clipboard access was blocked. Focus the desktop and press Ctrl+V to paste text.'; }
+  }
+  async copyRemote() {
+    if (!this.allowClipboard || this.remoteClipboard === null || this.closed) return;
+    try {
+      await this.root.ownerDocument.defaultView.navigator.clipboard.writeText(this.remoteClipboard);
+      this.clipStatus.textContent = 'Remote text copied to your local clipboard.';
+    } catch { this.clipStatus.textContent = 'Allow clipboard writes for this site, then click Copy remote clipboard again.'; }
   }
 
   async start() {
@@ -153,7 +244,7 @@ export class Viewer {
       this.identity.password = '';
       this.send({loginRequest:{username:this.identity.id, password, myId:'sixtonet-browser',
         myName:'SixtoNet browser operator', version:'1.4.9', myPlatform:'Web', videoAckRequired:true,
-        option:{imageQuality:3, customFps:30, disableAudio:2, disableClipboard:2,
+        option:{imageQuality:3, customFps:30, disableAudio:2, disableClipboard:this.allowClipboard ? 1 : 2,
           enableFileTransfer:1, disableKeyboard:this.allowInput ? 1 : 2, showRemoteCursor:2,
           supportedDecoding:{abilityVp9:1, prefer:1}}}});
     }
@@ -169,6 +260,20 @@ export class Viewer {
       this.status.textContent = 'Authenticated · waiting for the first video frame…';
     }
     if (message.testDelay && !message.testDelay.fromClient) this.send({testDelay:message.testDelay});
+    const clip = message.clipboard || message.multiClipboards?.clipboards?.find(c => c.format === 0);
+    if (message.multiClipboards && !clip && this.allowClipboard) {
+      this.remoteClipboard = null; this.copy.disabled = true;
+    }
+    if (clip && this.allowClipboard) {
+      if (clip.compress || clip.format !== 0 || clip.content.length > MAX_CLIPBOARD) {
+        this.remoteClipboard = null; this.copy.disabled = true;
+        this.clipStatus.textContent = 'Remote clipboard format is not supported. Update the desktop preview engine.';
+      } else {
+        this.remoteClipboard = new TextDecoder('utf-8', {fatal:true}).decode(clip.content);
+        this.copy.disabled = false;
+        this.clipStatus.textContent = 'Remote text is ready. Click Copy remote clipboard to copy it to this computer.';
+      }
+    }
     if (message.misc?.closeReason) throw Error(message.misc.closeReason);
     if (message.misc?.switchDisplay) {
       const d = message.misc.switchDisplay;
@@ -179,6 +284,9 @@ export class Viewer {
     }
     if (message.misc?.permissionInfo?.permission === 0 && !message.misc.permissionInfo.enabled) {
       this.releaseInput(); this.allowInput = false; this.control = false; this.controlButton.disabled = true;
+    }
+    if (message.misc?.permissionInfo?.permission === 2 && !message.misc.permissionInfo.enabled) {
+      this.allowClipboard = false; this.remoteClipboard = null; this.copy.disabled = true;
     }
     if (message.videoFrame) {
       const video = message.videoFrame;
@@ -223,6 +331,16 @@ export class Viewer {
       this.send({mouseEvent:{mask:(button << 3) | (down ? 1 : 2), ...p, modifiers:modifiers(e)}});
     });
     on(c, 'pointercancel', () => this.releaseInput());
+    on(c, 'blur', () => this.releaseInput());
+    on(c, 'paste', e => {
+      if (!this.allowClipboard || !this.canInput()) return;
+      e.preventDefault(); this.pasteText(e.clipboardData.getData('text/plain'));
+    });
+    on(c, 'compositionend', e => {
+      if (this.canInput() && e.data && e.data.length <= 4096) {
+        this.releaseInput(); this.send({keyEvent:{seq:e.data, down:true, mode:0}});
+      }
+    });
     on(c, 'wheel', e => {
       if (!this.canInput()) return;
       e.preventDefault();
@@ -230,14 +348,16 @@ export class Viewer {
     });
     for (const type of ['keydown','keyup']) on(c, type, e => {
       if (!this.canInput() || e.isComposing) return;
-      let key;
-      if (keys[e.key] !== undefined) key = {controlKey:keys[e.key]};
-      else if ([...e.key].length === 1) key = {chr:e.key.toLowerCase().codePointAt(0)};
-      else return;
-      e.preventDefault(); e.stopPropagation();
+      // Leave the browser's paste gesture intact; its paste event carries text
+      // without granting background clipboard reads.
+      if (this.allowClipboard && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') return;
       const down = type === 'keydown';
-      const message = {...key, down, mode:0, modifiers:modifiers(e)};
-      if (down) this.held.set(e.code, message); else this.held.delete(e.code);
+      const message = keyboardEvent(e, down);
+      if (!message) { if ([...e.key].length === 1) e.preventDefault(); return; }
+      e.preventDefault(); e.stopPropagation();
+      if (message.unicode === undefined) {
+        if (down) this.held.set(e.code, message); else this.held.delete(e.code);
+      } else this.releaseInput();
       this.send({keyEvent:message});
     });
   }
@@ -250,10 +370,12 @@ export class Viewer {
   close() {
     if (this.closed) return;
     this.releaseInput(); this.closed = true;
+    this.remoteClipboard = null; this.copy.disabled = true;
     clearInterval(this.timer); this.events.abort();
     this.ws?.close(); if (this.decoder?.state !== 'closed') this.decoder?.close();
     this.cipher.close(); if (this.identity) this.identity.password = '';
     this.controlButton.disabled = true; this.startButton.disabled = true;
     if (this.ws) this.exec('desktop_close', '').catch(() => {});
+    this.returnToTab();
   }
 }
