@@ -67,9 +67,10 @@ fn run() -> hbb_common::ResultType<()> {
         }
         return result;
     }
-    // Follow the active interactive user, not a disconnected physical console.
-    // This shares their existing desktop; it does not log on or unlock Windows.
-    let session_id = librustdesk::platform::windows::get_current_session_id(true);
+    // Browser support shares the physical console independently of any RDP
+    // client. An active but minimized RDP session can have no capture buffer.
+    // This does not transfer a user session, disconnect RDP or unlock Windows.
+    let session_id = librustdesk::platform::windows::get_current_session_id(false);
     if session_id == u32::MAX {
         bail!("Windows has no interactive desktop session");
     }

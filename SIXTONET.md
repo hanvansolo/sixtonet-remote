@@ -2,7 +2,11 @@
 
 This is a modified AGPL-3.0 RustDesk distribution, not an upstream RustDesk release.
 Upstream: https://github.com/rustdesk/rustdesk (baseline tag `1.4.9`).
-Corresponding source: https://github.com/hanvansolo/sixtonet-remote/tree/sixtonet
+Corresponding source: https://github.com/hanvansolo/sixtonet-remote/tree/sixtonet-console-capture
+
+Console-capture correction: browser support selects the physical Windows console,
+independently of an active or minimized Microsoft RDP session. It does not transfer
+sessions, disconnect RDP, unlock Windows or bypass the Windows logon screen.
 
 Keep `LICENCE`, upstream copyright notices, submodule source references, and this
 source offer with every binary and in the browser viewer's About/Source link.
