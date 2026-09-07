@@ -58,6 +58,9 @@ fn run() -> hbb_common::ResultType<()> {
     let config = sixtonet::read_config(&root.join("session.json"))?;
     validate_user_session(&config)?;
     if std::env::args().nth(1).as_deref() == Some("--server") {
+        if librustdesk::platform::windows::get_current_process_session_id() != Some(config.windows_session_id) {
+            bail!("capture process is not in the selected Windows user session");
+        }
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()?;

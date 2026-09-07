@@ -103,7 +103,11 @@ pub fn read_config(path: &Path) -> ResultType<SessionConfig> {
 pub async fn serve(cfg: SessionConfig) -> ResultType<()> {
     cfg.validate(now()?)?;
     #[cfg(windows)]
-    crate::sixtonet_notice::start(&cfg.operator, cfg.input)?;
+    {
+        let operator = cfg.operator.clone();
+        let input = cfg.input;
+        tokio::task::spawn_blocking(move || crate::sixtonet_notice::start(&operator, input)).await??;
+    }
     PASSWORD
         .set(cfg.password.clone())
         .map_err(|_| hbb_common::anyhow::anyhow!("session already initialized"))?;

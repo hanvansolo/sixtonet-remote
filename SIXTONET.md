@@ -1,5 +1,28 @@
 # SixtoNet Remote
 
+## Existing-user session and notice candidate (2026-09-07)
+
+This branch now requires windows_session_id, windows_username, windows_domain and
+operator in the SYSTEM/Admin-only session configuration. It is incompatible with
+older agent configurations. The agent selects an existing active Windows user;
+parent/child verify the target identity and the child verifies its own session ID.
+The parent ends the capture child if that user session disconnects or changes.
+No new Windows login, session transfer, RDP disconnect or logoff is performed.
+
+The child prepares a native notice and displays it after remote authentication.
+The notice identifies the grant's operator, shows view-only/input-permitted access,
+and provides End support session. User close/stop yields exit code 74, propagated
+by the parent for the agent to end the support grant. This is an endpoint UI, not
+the technician workspace; ordinary users need no technician application.
+
+Standalone Windows notice/session-validation tests and agent/browser fixtures
+passed. Full component and integrated selected-RDP-session capture, stop propagation,
+lock/UAC transitions and signing require release acceptance. This candidate is not
+a claim that the existing minimized-RDP capture problem is fixed. An ordinary notice
+window is not visible on Windows secure desktop. Historical console-only selection
+and absence-of-notice statements below are superseded for this candidate source.
+
+
 This is a modified AGPL-3.0 RustDesk distribution, not an upstream RustDesk release.
 Upstream: https://github.com/rustdesk/rustdesk (baseline tag `1.4.9`).
 Corresponding source: https://github.com/hanvansolo/sixtonet-remote/tree/sixtonet-console-capture
