@@ -52,8 +52,13 @@ fn run() -> hbb_common::ResultType<()> {
     if unsafe { is_local_system() } == 0 {
         bail!("the desktop adapter must be launched by the SYSTEM agent");
     }
+    let emergency = std::env::var("SIXTONET_EMERGENCY_DESKTOP").as_deref() == Ok("1");
     let root = PathBuf::from(std::env::var("ProgramData")?)
-        .join("SixtoNet")
+        .join(if emergency {
+            "SixtoNetResponse"
+        } else {
+            "SixtoNet"
+        })
         .join("desktop");
     let config = sixtonet::read_config(&root.join("session.json"))?;
     if std::env::args().nth(1).as_deref() == Some("--server") {

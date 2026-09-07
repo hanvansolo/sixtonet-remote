@@ -91,3 +91,14 @@ quality selection, clipboard, input and pop-out; unit tests cover decoder
 backpressure/recovery and image lifetime. These tests are not endpoint capture,
 hardware-encoding or visual-artifact acceptance tests. This release still uses
 software VP9 / 4:2:0; it does not add hardware encoding or lossless text mode.
+
+### Emergency broker pipe — 7 September 2026 (lab only)
+
+The adapter also accepts an exact local `SixtoNetDesktop-<nonce>` named pipe
+with port zero. The emergency broker creates that pipe with a SYSTEM/Admin-only
+ACL and rejects remote pipe clients. `SIXTONET_EMERGENCY_DESKTOP=1` selects the
+protected `ProgramData/SixtoNetResponse/desktop` configuration directory.
+Existing loopback sessions keep their current configuration and transport.
+The adapter's encrypted media and explicit input/clipboard permissions are
+unchanged. This is an unsigned build candidate; native isolation, console
+recovery, logon/UAC desktops and restoration still need pilot acceptance.

@@ -29,8 +29,14 @@ pub fn capture_diagnostics(path: &Path) -> ResultType<()> {
     let lines = AtomicUsize::new(0);
     hbb_common::env_logger::Builder::new()
         .filter_level(hbb_common::log::LevelFilter::Off)
-        .filter_module("librustdesk::server::video_service", hbb_common::log::LevelFilter::Info)
-        .filter_module("librustdesk::server::service", hbb_common::log::LevelFilter::Error)
+        .filter_module(
+            "librustdesk::server::video_service",
+            hbb_common::log::LevelFilter::Info,
+        )
+        .filter_module(
+            "librustdesk::server::service",
+            hbb_common::log::LevelFilter::Error,
+        )
         .format(move |out, record| {
             if lines.fetch_add(1, Ordering::Relaxed) >= 200 {
                 return Ok(());
@@ -67,6 +73,8 @@ pub fn valid_browser_clipboard(cb: &hbb_common::message_proto::Clipboard) -> boo
 #[serde(deny_unknown_fields)]
 pub struct SessionConfig {
     pub port: u16,
+    #[serde(default)]
+    pub pipe: Option<String>,
     pub nonce: String,
     pub password: String,
     pub expires_at: u64,
@@ -77,7 +85,13 @@ pub struct SessionConfig {
 
 impl SessionConfig {
     pub fn validate(&self, now: u64) -> ResultType<()> {
-        if self.port < 1024
+        let transport_ok = match &self.pipe {
+            None => self.port >= 1024,
+            Some(pipe) => {
+                self.port == 0 && pipe == &format!(r"\\.\pipe\SixtoNetDesktop-{}", self.nonce)
+            }
+        };
+        if !transport_ok
             || self.nonce.len() != 64
             || self.password.len() != 64
             || !self.nonce.bytes().all(|b| b.is_ascii_hexdigit())
@@ -130,13 +144,27 @@ pub async fn serve(cfg: SessionConfig) -> ResultType<()> {
     // Only connect to the authenticated local agent. Do not start RustDesk's
     // rendezvous mediator, LAN discovery, listener, updater, or desktop client.
     let addr = SocketAddr::from(([127, 0, 0, 1], cfg.port));
-    let socket = tokio::time::timeout(
-        Duration::from_secs(10),
-        tokio::net::TcpStream::connect(addr),
-    )
-    .await??;
-    socket.set_nodelay(true)?;
-    let mut stream = Stream::from(socket, addr);
+    let mut stream = if let Some(pipe) = &cfg.pipe {
+        #[cfg(windows)]
+        {
+            Stream::from(
+                tokio::net::windows::named_pipe::ClientOptions::new().open(pipe)?,
+                addr,
+            )
+        }
+        #[cfg(not(windows))]
+        {
+            bail!("desktop named pipes require Windows");
+        }
+    } else {
+        let socket = tokio::time::timeout(
+            Duration::from_secs(10),
+            tokio::net::TcpStream::connect(addr),
+        )
+        .await??;
+        socket.set_nodelay(true)?;
+        Stream::from(socket, addr)
+    };
     let (_, key) = Config::get_key_pair();
     if key.len() != 32 {
         bail!("the desktop identity key is unavailable");
@@ -179,6 +207,7 @@ mod tests {
     fn config() -> SessionConfig {
         SessionConfig {
             port: 45000,
+            pipe: None,
             nonce: "a".repeat(64),
             password: "b".repeat(64),
             expires_at: 1060,
@@ -206,5 +235,17 @@ mod tests {
         assert_eq!(c.permissions() & 3, 2);
         assert_eq!((c.permissions() >> 6) & 3, 1); // files not implicitly allowed
         assert_eq!((c.permissions() >> 8) & 3, 1); // audio not implicitly allowed
+    }
+    #[test]
+    fn emergency_pipe_is_local_and_nonce_bound() {
+        let mut c = config();
+        c.port = 0;
+        c.pipe = Some(format!(r"\\.\pipe\SixtoNetDesktop-{}", c.nonce));
+        assert!(c.validate(1000).is_ok());
+        c.port = 45000;
+        assert!(c.validate(1000).is_err());
+        c.port = 0;
+        c.pipe = Some(r"\\remote\pipe\SixtoNetDesktop-fake".into());
+        assert!(c.validate(1000).is_err());
     }
 }
