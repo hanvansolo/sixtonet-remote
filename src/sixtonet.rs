@@ -45,6 +45,7 @@ pub fn valid_browser_clipboard(cb: &hbb_common::message_proto::Clipboard) -> boo
 pub struct SessionConfig {
     pub windows_session_id: u32,
     pub windows_username: String,
+    pub windows_domain: String,
     pub operator: String,
     pub port: u16,
     pub nonce: String,
@@ -164,6 +165,7 @@ mod tests {
         SessionConfig {
             windows_session_id: 7,
             windows_username: "LabUser".into(),
+            windows_domain: "LAB".into(),
             operator: "Support".into(),
             port: 45000,
             nonce: "a".repeat(64),

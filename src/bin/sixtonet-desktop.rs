@@ -154,6 +154,18 @@ fn validate_user_session(cfg: &librustdesk::sixtonet::SessionConfig) -> hbb_comm
         };
         WTSFreeMemory(value as _);
         if name != cfg.windows_username { hbb_common::bail!("selected Windows user changed"); }
+        if WTSQuerySessionInformationW(std::ptr::null_mut(), cfg.windows_session_id,
+            WTSDomainName, &mut value, &mut size) == 0 {
+            return Err(std::io::Error::last_os_error().into());
+        }
+        let domain = if value.is_null() || size < 2 { String::new() } else {
+            let units = std::slice::from_raw_parts(value, size as usize / 2);
+            let end = units.iter().position(|v| *v == 0).unwrap_or(units.len());
+            String::from_utf16_lossy(&units[..end])
+        };
+        WTSFreeMemory(value as _);
+        if domain != cfg.windows_domain { hbb_common::bail!("selected Windows domain changed"); }
+
     }
     Ok(())
 }
