@@ -43,6 +43,9 @@ pub fn valid_browser_clipboard(cb: &hbb_common::message_proto::Clipboard) -> boo
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SessionConfig {
+    pub windows_session_id: u32,
+    pub windows_username: String,
+    pub operator: String,
     pub port: u16,
     pub nonce: String,
     pub password: String,
@@ -54,7 +57,9 @@ pub struct SessionConfig {
 
 impl SessionConfig {
     pub fn validate(&self, now: u64) -> ResultType<()> {
-        if self.port < 1024
+        if self.windows_session_id == 0 || self.windows_session_id == u32::MAX
+            || self.windows_username.is_empty() || self.operator.len() > 800
+            || self.port < 1024
             || self.nonce.len() != 64
             || self.password.len() != 64
             || !self.nonce.bytes().all(|b| b.is_ascii_hexdigit())
@@ -96,6 +101,8 @@ pub fn read_config(path: &Path) -> ResultType<SessionConfig> {
 
 pub async fn serve(cfg: SessionConfig) -> ResultType<()> {
     cfg.validate(now()?)?;
+    #[cfg(windows)]
+    crate::sixtonet_notice::start(&cfg.operator, cfg.input)?;
     PASSWORD
         .set(cfg.password.clone())
         .map_err(|_| hbb_common::anyhow::anyhow!("session already initialized"))?;
@@ -155,6 +162,9 @@ mod tests {
     }
     fn config() -> SessionConfig {
         SessionConfig {
+            windows_session_id: 7,
+            windows_username: "LabUser".into(),
+            operator: "Support".into(),
             port: 45000,
             nonce: "a".repeat(64),
             password: "b".repeat(64),

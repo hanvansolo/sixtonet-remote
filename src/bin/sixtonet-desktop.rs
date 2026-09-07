@@ -56,6 +56,7 @@ fn run() -> hbb_common::ResultType<()> {
         .join("SixtoNet")
         .join("desktop");
     let config = sixtonet::read_config(&root.join("session.json"))?;
+    validate_user_session(&config)?;
     if std::env::args().nth(1).as_deref() == Some("--server") {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -67,10 +68,9 @@ fn run() -> hbb_common::ResultType<()> {
         }
         return result;
     }
-    // Browser support shares the physical console independently of any RDP
-    // client. An active but minimized RDP session can have no capture buffer.
-    // This does not transfer a user session, disconnect RDP or unlock Windows.
-    let session_id = librustdesk::platform::windows::get_current_session_id(false);
+    // The SYSTEM agent selects an existing active user session. This does not
+    // create a login, transfer the user, disconnect RDP or unlock Windows.
+    let session_id = config.windows_session_id;
     if session_id == u32::MAX {
         bail!("Windows has no interactive desktop session");
     }
@@ -116,7 +116,10 @@ fn run() -> hbb_common::ResultType<()> {
             break;
         }
     }
+    let mut child_exit = 0u32;
+    unsafe { winapi::um::processthreadsapi::GetExitCodeProcess(handle, &mut child_exit); }
     drop(owned);
+    if child_exit == 74 { std::process::exit(74); }
     std::thread::sleep(Duration::from_millis(50));
     Ok(())
 }
@@ -125,4 +128,32 @@ fn run() -> hbb_common::ResultType<()> {
 fn main() {
     eprintln!("This adapter requires Windows and --features sixtonet.");
     std::process::exit(1);
+}
+
+#[cfg(all(windows, feature = "sixtonet"))]
+fn validate_user_session(cfg: &librustdesk::sixtonet::SessionConfig) -> hbb_common::ResultType<()> {
+    use winapi::um::wtsapi32::*;
+    unsafe {
+        let mut value: *mut u16 = std::ptr::null_mut();
+        let mut size = 0;
+        if WTSQuerySessionInformationW(std::ptr::null_mut(), cfg.windows_session_id,
+            WTSConnectState, &mut value, &mut size) == 0 {
+            return Err(std::io::Error::last_os_error().into());
+        }
+        let active = size >= 4 && !value.is_null() && *(value as *const u32) == 0;
+        WTSFreeMemory(value as _);
+        if !active { hbb_common::bail!("selected Windows user session is not active"); }
+        if WTSQuerySessionInformationW(std::ptr::null_mut(), cfg.windows_session_id,
+            WTSUserName, &mut value, &mut size) == 0 {
+            return Err(std::io::Error::last_os_error().into());
+        }
+        let name = if value.is_null() || size < 2 { String::new() } else {
+            let units = std::slice::from_raw_parts(value, size as usize / 2);
+            let end = units.iter().position(|v| *v == 0).unwrap_or(units.len());
+            String::from_utf16_lossy(&units[..end])
+        };
+        WTSFreeMemory(value as _);
+        if name != cfg.windows_username { hbb_common::bail!("selected Windows user changed"); }
+    }
+    Ok(())
 }

@@ -1655,6 +1655,8 @@ impl Connection {
             return false;
         }
         self.authorized = true;
+        #[cfg(feature = "sixtonet")]
+        if crate::sixtonet::session_password().is_some() { crate::sixtonet_notice::connected(); }
         let (conn_type, auth_conn_type) = if self.file_transfer.is_some() {
             (1, AuthConnType::FileTransfer)
         } else if self.port_forward_socket.is_some() {
