@@ -57,7 +57,8 @@ export function keyboardEvent(e, down) {
 const MAX_CLIPBOARD = 1024 * 1024;
 
 export class Viewer {
-  constructor(root, {url, exec, input = false, clipboard = false, title = 'SixtoNet Remote Desktop'}) {
+  constructor(root, {url, exec, input = false, clipboard = false, title = 'SixtoNet Remote Desktop', returnHost = null}) {
+    this.returnHost = returnHost;
     this.root = root; this.url = url; this.exec = exec; this.allowInput = input;
     this.allowClipboard = clipboard; this.remoteClipboard = null; this.title = title;
     root.classList.add('desktop-viewer');
@@ -146,10 +147,7 @@ export class Viewer {
       // A still desktop legitimately produces no delta frames. Use RustDesk's
       // authenticated heartbeat for liveness, not changing pixels.
       if (this.lastFrame && Date.now() - this.lastPacket > 5000) {
-        this.releaseInput(); this.control = false; this.controlButton.disabled = true;
-        buttonLabel(this.controlButton, 'Take control');
-        this.controlButton.setAttribute('aria-pressed', 'false');
-        this.controlButton.classList.remove('primary');
+        this.releaseInput(); this.controlButton.disabled = true;
         this.status.textContent = 'Waiting for the next desktop frame; control is suspended.';
       }
     }, 1000);
@@ -193,10 +191,12 @@ export class Viewer {
   returnToTab() {
     const popup = this.popup;
     if (!popup) return;
+    const host = !this.closed && !this.anchor?.isConnected ? this.returnHost?.() : null;
     this.popup = null; this.releaseInput(); this.clearPresentation();
     this.popoutButton.hidden = false;
     this.placeholder?.remove();
     if (this.anchor?.isConnected) this.anchor.replaceWith(this.root);
+    else if (host?.isConnected) host.replaceChildren(this.root);
     else this.close();
     if (!popup.closed) popup.close();
   }
@@ -303,9 +303,8 @@ export class Viewer {
     // A short burst is not corruption. Recover at a keyframe only after the
     // latency or queue budget is exhausted, instead of repeatedly resetting.
     if (this.decodeTimes.size >= 20 || this.decoder.decodeQueueSize >= 20 || (oldest != null && now - oldest > 500)) {
-      this.releaseInput(); this.control = false; this.lastFrame = 0;
-      this.controlButton.disabled = true; buttonLabel(this.controlButton,'Take control');
-      this.controlButton.setAttribute('aria-pressed','false'); this.controlButton.classList.remove('primary');
+      this.releaseInput(); this.lastFrame = 0;
+      this.controlButton.disabled = true;
       this.clearPresentation(); this.decodeTimes.clear();
       this.decoder.reset(); this.configureDecoder(); this.recoveries++;
       this.status.textContent = 'Recovering the desktop stream; waiting for a complete frame.';
@@ -331,6 +330,10 @@ export class Viewer {
     this.bytes += data.byteLength;
     const message = this.cipher.decode(new Uint8Array(data));
     this.lastPacket = Date.now();
+    if (this.lastFrame) {
+      this.controlButton.disabled = !this.allowInput;
+      this.status.textContent = this.control ? 'Live · you have mouse and keyboard control' : 'Live · view only';
+    }
     if (message.signedId) {
       this.ws.send(this.cipher.handshake(message.signedId.id, this.identity)); return;
     }
@@ -455,13 +458,17 @@ export class Viewer {
     });
   }
   releaseInput() {
-    for (const key of this.held.values()) this.send({keyEvent:{...key, down:false, modifiers:[]}});
-    for (const button of this.buttons) this.send({mouseEvent:{mask:(button << 3) | 2}});
+    const held = [...this.held.values()], buttons = [...this.buttons];
+    this.held.clear(); this.buttons.clear();
+    for (const key of held) this.send({keyEvent:{...key, down:false, modifiers:[]}});
+    for (const button of buttons) this.send({mouseEvent:{mask:(button << 3) | 2}});
     this.held.clear(); this.buttons.clear();
   }
   fail(message) { this.status.textContent = message; this.close(); }
   close() {
     if (this.closed) return;
+    if (this.closing) return;
+    this.closing = true;
     this.releaseInput(); this.closed = true;
     this.remoteClipboard = null; this.copy.disabled = true;
     clearInterval(this.timer); this.events.abort();

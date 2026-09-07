@@ -129,3 +129,63 @@ test('quality survives connection and a delayed relay no longer serialises each 
   await page.evaluate(()=>viewer.close());
   expect(await page.evaluate(()=>({pending:viewer.latestFrame,decode:viewer.decodeTimes.size}))).toEqual({pending:null,decode:0});
 });
+
+
+test('transient stalls preserve control intent and congestion closes without recursion', async ({page}) => {
+  const errors=[]; page.on('pageerror',e=>errors.push(e.message));
+  await page.route('https://desktop.test/**',route=>route.fulfill({status:200,
+    contentType:route.request().url().endsWith('fixture.js')?'application/javascript':'text/html',
+    body:route.request().url().endsWith('fixture.js')?readFileSync('dist/browser-fixture.js'):
+      '<!doctype html><div id="viewer"></div><script src="/fixture.js"></script>'}));
+  await page.goto('https://desktop.test/');
+  await page.getByRole('button',{name:'Start desktop'}).click();
+  await expect(page.getByText('Live · view only',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Take control',exact:true}).click();
+  await page.evaluate(()=>{
+    // Exhaust the decoder latency budget while the user has control.
+    viewer.decodeTimes.set(-1,performance.now()-1000);
+  });
+  await expect.poll(()=>page.evaluate(()=>viewer.recoveries)).toBeGreaterThan(0);
+  await expect.poll(()=>page.evaluate(()=>viewer.canInput())).toBe(true);
+  await expect(page.getByRole('button',{name:'Give back control'})).toHaveAttribute('aria-pressed','true');
+  // Simulate lost heartbeat while the desktop is still; resume with authenticated traffic.
+  await page.evaluate(()=>{window.savedReceive=viewer.receive.bind(viewer);viewer.receive=async()=>{};viewer.lastPacket=Date.now()-6000;});
+  await expect(page.getByRole('button',{name:'Give back control'})).toBeDisabled();
+  expect(await page.evaluate(()=>viewer.canInput())).toBe(false);
+  await page.evaluate(()=>{viewer.receive=savedReceive;viewer.cipher.decode=()=>({testDelay:{fromClient:true}});});
+  await expect(page.getByRole('button',{name:'Give back control'})).toBeEnabled();
+  expect(await page.evaluate(()=>viewer.canInput())).toBe(true);
+  await page.evaluate(()=>{
+    viewer.held.set('Control',{controlKey:4,down:true});
+    viewer.ws.bufferedAmount=2*1024*1024;
+    viewer.send({mouseEvent:{mask:0,x:1,y:1}});
+  });
+  expect(await page.evaluate(()=>viewer.closed)).toBe(true);
+  expect(await page.evaluate(()=>observed.commands.filter(x=>x==='desktop_close').length)).toBe(1);
+  expect(errors).toEqual([]);
+});
+
+test('popout returns to a fresh console host after its original pane is removed', async ({page}) => {
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.route('https://desktop.test/**',route=>route.fulfill({status:200,
+    contentType:route.request().url().endsWith('fixture.js')?'application/javascript':'text/html',
+    body:route.request().url().endsWith('fixture.js')?readFileSync('dist/browser-fixture.js'):
+      '<!doctype html><div id="pane"><div id="viewer"></div></div><script src="/fixture.js"></script>'}));
+  await page.goto('https://desktop.test/');
+  await page.getByRole('button',{name:'Start desktop'}).click();
+  await expect(page.locator('canvas')).toBeVisible();
+  const opened=page.waitForEvent('popup');
+  await page.getByRole('button',{name:'Pop out',exact:true}).click();
+  const popup=await opened;
+  await page.evaluate(()=>{
+    document.querySelector('#pane').replaceChildren();
+    viewer.returnHost=()=>document.querySelector('#pane');
+  });
+  await popup.close();
+  await expect(page.locator('canvas')).toBeVisible();
+  expect(await page.evaluate(()=>viewer.closed)).toBe(false);
+  expect(await page.evaluate(()=>observed.commands.filter(x=>x==='desktop_open').length)).toBe(1);
+  await expect.poll(()=>page.evaluate(()=>viewer.presented)).toBeGreaterThan(2);
+  expect(errors).toEqual([]);
+  await page.evaluate(()=>viewer.close());
+});
