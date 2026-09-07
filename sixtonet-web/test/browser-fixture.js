@@ -81,7 +81,8 @@ async function video() {
     encoder.encode(vf,{keyFrame:forceKey||frame%60===0});frame++;forceKey=false;vf.close();
   },10);
 }
-window.viewer=new Viewer(document.querySelector('#viewer'),{url:'wss://localhost/test',input:true,
+window.viewer=new Viewer(document.querySelector('#viewer'),{url:'wss://localhost/test',input:!new URL(location.href).searchParams.has('viewonly'),
+  controlOnConnect:new URL(location.href).searchParams.has('control'),
   clipboard:new URL(location.href).searchParams.has('clipboard'),
   exec:async kind=> {
     window.observed.commands.push(kind);

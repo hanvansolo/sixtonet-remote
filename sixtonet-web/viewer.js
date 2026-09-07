@@ -57,12 +57,12 @@ export function keyboardEvent(e, down) {
 const MAX_CLIPBOARD = 1024 * 1024;
 
 export class Viewer {
-  constructor(root, {url, exec, input = false, clipboard = false, title = 'SixtoNet Remote Desktop', returnHost = null}) {
+  constructor(root, {url, exec, input = false, clipboard = false, controlOnConnect = false, title = 'SixtoNet Remote Desktop', returnHost = null}) {
     this.returnHost = returnHost;
     this.root = root; this.url = url; this.exec = exec; this.allowInput = input;
     this.allowClipboard = clipboard; this.remoteClipboard = null; this.title = title;
     root.classList.add('desktop-viewer');
-    this.cipher = new Cipher(); this.closed = false; this.control = false;
+    this.cipher = new Cipher(); this.closed = false; this.control = input && controlOnConnect;
     this.held = new Map(); this.buttons = new Set(); this.lastFrame = 0; this.lastPacket = 0;
     this.displays = []; this.displayIndex = 0; this.frames = 0; this.bytes = 0;
     this.events = new AbortController(); this.pending = 0;
@@ -71,7 +71,9 @@ export class Viewer {
     const head = element('div', '', 'card-head');
     this.startButton = iconButton('Start desktop', 'M8 5l11 7-11 7Z', 'primary');
     this.controlButton = iconButton('Take control', 'M4 3l6 17 3-7 7-3Z M13 13l6 6');
-    this.controlButton.setAttribute('aria-pressed', 'false');
+    this.controlButton.setAttribute('aria-pressed', String(this.control));
+    buttonLabel(this.controlButton, this.control ? 'Give back control' : 'Take control');
+    this.controlButton.classList.toggle('primary', this.control);
     this.controlButton.disabled = true;
     this.monitor = element('select', '', 'sel'); this.monitor.setAttribute('aria-label', 'Remote monitor');
     const full = iconButton('Full screen', 'M8 3H3v5 M16 3h5v5 M3 16v5h5 M21 16v5h-5');

@@ -1,6 +1,21 @@
 import {test,expect} from '@playwright/test';
 import {readFileSync} from 'node:fs';
 
+test('explicit control-on-connect waits for video and cannot override a view-only grant', async ({page})=>{
+  await page.route('https://desktop.test/**', route=>route.fulfill({contentType:route.request().url().endsWith('fixture.js')?'application/javascript':'text/html',
+    body:route.request().url().endsWith('fixture.js')?readFileSync('dist/browser-fixture.js'):'<div id="viewer"></div><script src="/fixture.js"></script>'}));
+  await page.goto('https://desktop.test/?control');
+  expect(await page.evaluate(()=>viewer.canInput())).toBeFalsy();
+  await page.getByRole('button',{name:'Start desktop'}).click();
+  await expect(page.getByText('Live · you have mouse and keyboard control',{exact:true})).toBeVisible({timeout:15000});
+  await page.locator('canvas').click({position:{x:100,y:100}});
+  expect(await page.evaluate(()=>observed.mouse.length)).toBeGreaterThan(0);
+  await page.goto('https://desktop.test/?control&viewonly');
+  await page.getByRole('button',{name:'Start desktop'}).click();
+  await expect(page.getByText('Live · view only',{exact:true})).toBeVisible({timeout:15000});
+  expect(await page.evaluate(()=>viewer.canInput())).toBeFalsy();
+});
+
 test('real browser decrypts VP9 inter-frames, gates input and releases held keys', async ({page})=>{
   const errors=[];
   page.on('pageerror',e=>errors.push(e.message));
