@@ -108,6 +108,8 @@ fn run() -> hbb_common::ResultType<()> {
     while sixtonet::now().map(|now| now < deadline).unwrap_or(false)
         && root.join("session.json").exists()
     {
+        // A user logout/disconnect must end sharing, never retarget another desktop.
+        if validate_user_session(&config).is_err() { break; }
         let status = unsafe { WaitForSingleObject(handle, 200) };
         if status == 0 {
             break;
@@ -117,7 +119,11 @@ fn run() -> hbb_common::ResultType<()> {
         }
     }
     let mut child_exit = 0u32;
-    unsafe { winapi::um::processthreadsapi::GetExitCodeProcess(handle, &mut child_exit); }
+    unsafe {
+        // The stream may close just before Windows signals process termination.
+        WaitForSingleObject(handle, 200);
+        winapi::um::processthreadsapi::GetExitCodeProcess(handle, &mut child_exit);
+    }
     drop(owned);
     if child_exit == 74 { std::process::exit(74); }
     std::thread::sleep(Duration::from_millis(50));
