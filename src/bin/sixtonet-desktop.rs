@@ -138,19 +138,28 @@ fn main() {
 
 #[cfg(all(windows, feature = "sixtonet"))]
 fn validate_user_session(cfg: &librustdesk::sixtonet::SessionConfig) -> hbb_common::ResultType<()> {
-    use winapi::um::wtsapi32::*;
+    // winapi 0.3's wtsapi32 module has no bindings for these functions.
+    #[link(name = "Wtsapi32")]
+    extern "system" {
+        fn WTSQuerySessionInformationW(server: winapi::shared::ntdef::HANDLE, session: u32,
+            info: i32, value: *mut *mut u16, bytes: *mut u32) -> i32;
+        fn WTSFreeMemory(value: *mut std::ffi::c_void);
+    }
+    const WTS_CONNECT_STATE: i32 = 8;
+    const WTS_USER_NAME: i32 = 5;
+    const WTS_DOMAIN_NAME: i32 = 7;
     unsafe {
         let mut value: *mut u16 = std::ptr::null_mut();
         let mut size = 0;
         if WTSQuerySessionInformationW(std::ptr::null_mut(), cfg.windows_session_id,
-            WTSConnectState, &mut value, &mut size) == 0 {
+            WTS_CONNECT_STATE, &mut value, &mut size) == 0 {
             return Err(std::io::Error::last_os_error().into());
         }
         let active = size >= 4 && !value.is_null() && *(value as *const u32) == 0;
         WTSFreeMemory(value as _);
         if !active { hbb_common::bail!("selected Windows user session is not active"); }
         if WTSQuerySessionInformationW(std::ptr::null_mut(), cfg.windows_session_id,
-            WTSUserName, &mut value, &mut size) == 0 {
+            WTS_USER_NAME, &mut value, &mut size) == 0 {
             return Err(std::io::Error::last_os_error().into());
         }
         let name = if value.is_null() || size < 2 { String::new() } else {
@@ -161,7 +170,7 @@ fn validate_user_session(cfg: &librustdesk::sixtonet::SessionConfig) -> hbb_comm
         WTSFreeMemory(value as _);
         if name != cfg.windows_username { hbb_common::bail!("selected Windows user changed"); }
         if WTSQuerySessionInformationW(std::ptr::null_mut(), cfg.windows_session_id,
-            WTSDomainName, &mut value, &mut size) == 0 {
+            WTS_DOMAIN_NAME, &mut value, &mut size) == 0 {
             return Err(std::io::Error::last_os_error().into());
         }
         let domain = if value.is_null() || size < 2 { String::new() } else {

@@ -105,7 +105,6 @@ qrcode-generator = "4.1"
 [target.'cfg(target_os = "windows")'.dependencies]
 winapi = { version = "0.3", features = [
     "winuser",
-    "wtsapi32",
     "wincrypt",
     "shellscalingapi",
     "pdh",
