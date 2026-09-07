@@ -147,10 +147,12 @@ pub async fn serve(cfg: SessionConfig) -> ResultType<()> {
     let mut stream = if let Some(pipe) = &cfg.pipe {
         #[cfg(windows)]
         {
-            Stream::from(
+            // Reuse the framed codec with local IPC; Stream::from itself only
+            // accepts a TCP socket, while FramedStream accepts AsyncRead/Write.
+            Stream::Tcp(hbb_common::tcp::FramedStream::from(
                 tokio::net::windows::named_pipe::ClientOptions::new().open(pipe)?,
                 addr,
-            )
+            ))
         }
         #[cfg(not(windows))]
         {
