@@ -41,7 +41,7 @@ RustDesk sessions. `Cargo.toml` and `src/lib.rs` register the opt-in adapter.
 `src/server.rs` additionally refuses the legacy unencrypted handshake fallback
 only for the initialized SixtoNet adapter. Ordinary RustDesk paths are unchanged.
 No upstream capture, encoding, or input implementations are replaced. The adapter
-follows the active Windows user session (including an active non-console session),
+shares the physical Windows console independently of active RDP sessions,
 without performing a Windows logon or bypassing its lock screen. Clipboard hooks
 restrict the browser adapter to uncompressed UTF-8 text, at most 1 MiB, when the
 signed session separately grants two-way clipboard sharing.
