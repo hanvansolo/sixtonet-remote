@@ -11,7 +11,9 @@ No new Windows login, session transfer, RDP disconnect or logoff is performed.
 
 The child prepares a native notice and displays it after remote authentication.
 The notice identifies the grant's operator, shows view-only/input-permitted access,
-and provides End support session. User close/stop yields exit code 74, propagated
+and provides End support session. The title-bar X collapses the notice while
+keeping End support session and Show details visible; it does not end access.
+The explicit End support session button yields exit code 74, propagated
 by the parent for the agent to end the support grant. This is an endpoint UI, not
 the technician workspace; ordinary users need no technician application.
 
