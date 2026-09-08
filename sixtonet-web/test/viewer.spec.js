@@ -241,3 +241,21 @@ test('ended desktop clears the frozen picture, exits fullscreen and remains dism
   await page.getByRole('button',{name:'Close remote view',exact:true}).click();
   await expect(page.locator('#viewer')).toBeHidden();
 });
+
+
+test('a real decoder error recovers video without closing the support session', async ({page}) => {
+  await page.route('https://desktop.test/**',route=>route.fulfill({contentType:route.request().url().endsWith('fixture.js')?'application/javascript':'text/html',body:route.request().url().endsWith('fixture.js')?readFileSync('dist/browser-fixture.js'):'<div id="viewer"></div><script src="/fixture.js"></script>'}));
+  await page.goto('https://desktop.test/?control');
+  await page.getByRole('button',{name:'Start desktop'}).click();
+  await expect.poll(()=>page.evaluate(()=>viewer.presented)).toBeGreaterThan(0);
+  const before=await page.evaluate(()=>{window.priorDecoder=viewer.decoder;window.disconnects=0;viewer.onDisconnect=()=>disconnects++;const count=viewer.presented;viewer.decodeVideo({key:true,pts:987654,data:new Uint8Array([255,255,255])});return count;});
+  await expect.poll(()=>page.evaluate(()=>viewer.decoder!==priorDecoder)).toBe(true);
+  await expect.poll(()=>page.evaluate(()=>viewer.presented)).toBeGreaterThan(before);
+  await expect.poll(()=>page.evaluate(()=>viewer.canInput())).toBe(true);
+  expect(await page.evaluate(()=>({closed:viewer.closed,disconnects,stops:observed.commands.filter(c=>c==='desktop_close').length}))).toEqual({closed:false,disconnects:0,stops:0});
+  // Persistent decoder failures terminate with one useful reason, never loop.
+  await page.evaluate(()=>{for(let i=0;i<4;i++)viewer.recoverDecoder();});
+  expect(await page.evaluate(()=>viewer.closed)).toBe(true);
+  expect(await page.evaluate(()=>disconnects)).toBe(1);
+  await expect(page.getByText('The browser video decoder repeatedly failed. Reconnect to retry.')).toBeVisible();
+});

@@ -235,12 +235,7 @@ export class Viewer {
     if (!support.supported) throw Error('This browser cannot decode VP9 desktop video.');
     if (this.closed) return;
     this.startButton.disabled = true; this.status.textContent = 'Connecting to the endpoint desktop engine…';
-    this.decoder = new VideoDecoder({output: frame => {
-      if (this.closed) { frame.close(); return; }
-      this.decodeTimes.delete(frame.timestamp);
-      this.queuePresentation(frame);
-    }, error: () => this.fail('The browser video decoder failed. End and reopen the desktop.')});
-    this.configureDecoder();
+    this.createDecoder();
     this.ws = new WebSocket(this.url); this.ws.binaryType = 'arraybuffer';
     let sequence = Promise.resolve();
     this.ws.onmessage = event => {
@@ -250,14 +245,43 @@ export class Viewer {
       sequence = sequence.then(() => this.receive(event.data)).catch(e => this.fail(e.message))
         .finally(() => this.pending--);
     };
-    this.ws.onclose = () => { if (!this.closed) this.fail('The desktop connection ended. Reopen the Remote Desktop tab to retry.'); };
-    this.ws.onerror = () => this.fail('Could not establish the authenticated desktop connection.');
+    this.ws.onclose = event => { if (!this.closed) this.fail(event.reason || `The desktop connection ended (WebSocket ${event.code}).`); };
+    this.ws.onerror = () => this.fail('The desktop network connection failed.');
     await new Promise((resolve, reject) => {
       this.ws.addEventListener('open', resolve, {once:true});
       this.ws.addEventListener('close', () => reject(Error('Desktop channel was refused')), {once:true});
     });
     const r = await this.exec('desktop_open', '');
     if (!r.ok) throw Error(r.error || 'The endpoint could not start its desktop engine');
+  }
+  createDecoder() {
+    const decoder = new VideoDecoder({output: frame => {
+      if (this.decoder !== decoder) { frame.close(); return; }
+      if (this.closed) { frame.close(); return; }
+      this.decodeTimes.delete(frame.timestamp);
+      this.queuePresentation(frame);
+    }, error: () => { if (this.decoder === decoder) this.recoverDecoder(); }});
+    this.decoder = decoder;
+    this.configureDecoder();
+  }
+  recoverDecoder() {
+    if (this.closed) return;
+    const now = performance.now();
+    this.decoderErrors = (this.decoderErrors || []).filter(at => now - at < 60000);
+    if (this.decoderErrors.length >= 3) {
+      this.fail('The browser video decoder repeatedly failed. Reconnect to retry.'); return;
+    }
+    this.decoderErrors.push(now);
+    this.releaseInput(); this.lastFrame = 0; this.controlButton.disabled = true;
+    this.clearPresentation(); this.decodeTimes.clear();
+    if (this.decoder?.state !== 'closed') this.decoder?.close();
+    try { this.createDecoder(); }
+    catch { this.fail('The browser could not restart its video decoder.'); return; }
+    this.recoveries++;
+    this.status.textContent = 'Recovering video; waiting for a complete frame. Control is suspended.';
+    this.lastPressure = now;
+    this.setFrameRate(10);
+    this.send({misc:{refreshVideo:true}});
   }
   configureDecoder() {
     this.decoder.configure({codec:'vp09.00.10.08', optimizeForLatency:true, hardwareAcceleration:'no-preference'});
@@ -317,7 +341,9 @@ export class Viewer {
     this.needKey = false;
     const timestamp = Number(frame.pts) * 1000;
     this.decodeTimes.set(timestamp,now);
-    this.decoder.decode(new EncodedVideoChunk({type:frame.key ? 'key' : 'delta',timestamp,data:frame.data}));
+    try {
+      this.decoder.decode(new EncodedVideoChunk({type:frame.key ? 'key' : 'delta',timestamp,data:frame.data}));
+    } catch { this.recoverDecoder(); }
   }
   async receive(data) {
     if (this.closed) return;
@@ -469,7 +495,7 @@ export class Viewer {
   fail(message) {
     if (this.closed) return;
     this.status.textContent = message; this.close();
-    this.onDisconnect?.();
+    this.onDisconnect?.(message);
   }
   close() {
     if (this.closed) return;
