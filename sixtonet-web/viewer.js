@@ -479,6 +479,15 @@ export class Viewer {
     this.cipher.close(); if (this.identity) this.identity.password = '';
     this.controlButton.disabled = true; this.startButton.disabled = true;
     if (this.ws) this.exec('desktop_close', '').catch(() => {});
+    const doc = this.root.ownerDocument;
+    if (doc.fullscreenElement && (doc.fullscreenElement === this.root || this.root.contains(doc.fullscreenElement))) {
+      doc.exitFullscreen().catch(() => {});
+    }
+    this.canvas.hidden = true; this.canvas.width = this.canvas.height = 0;
+    const dismiss = element('button', 'Close remote view', 'btn');
+    // Cleanup aborted the streaming listeners; this local close action must remain usable.
+    dismiss.addEventListener('click', () => { this.root.hidden = true; });
+    this.root.replaceChildren(this.status, dismiss);
     this.returnToTab();
   }
 }

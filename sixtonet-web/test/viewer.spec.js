@@ -224,3 +224,19 @@ test('taking canvas focus does not scroll between mouse down and up', async ({pa
   const events=await page.evaluate(()=>observed.mouse.filter(m=>m.mask===9||m.mask===10));
   expect(events[0].x).toBe(events[1].x);expect(events[0].y).toBe(events[1].y);
 });
+
+
+test('ended desktop clears the frozen picture, exits fullscreen and remains dismissible', async ({page})=>{
+  await page.route('https://desktop.test/**',route=>route.fulfill({contentType:route.request().url().endsWith('fixture.js')?'application/javascript':'text/html',body:route.request().url().endsWith('fixture.js')?readFileSync('dist/browser-fixture.js'):'<div id="viewer"></div><script src="/fixture.js"></script>'}));
+  await page.goto('https://desktop.test/?control');
+  await page.getByRole('button',{name:'Start desktop'}).click();
+  await expect.poll(()=>page.evaluate(()=>viewer.lastFrame)).toBeGreaterThan(0);
+  await page.getByRole('button',{name:'Full screen',exact:true}).click();
+  await expect.poll(()=>page.evaluate(()=>!!document.fullscreenElement)).toBe(true);
+  await page.evaluate(()=>viewer.fail('The remote user ended this session.'));
+  await expect.poll(()=>page.evaluate(()=>!!document.fullscreenElement)).toBe(false);
+  await expect(page.locator('#viewer canvas')).toHaveCount(0);
+  await expect(page.getByText('The remote user ended this session.')).toBeVisible();
+  await page.getByRole('button',{name:'Close remote view',exact:true}).click();
+  await expect(page.locator('#viewer')).toBeHidden();
+});
