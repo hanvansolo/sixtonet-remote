@@ -424,7 +424,7 @@ export class Viewer {
       this.send({mouseEvent:{mask:0, ...p, modifiers:modifiers(e)}});
       if (type === 'pointermove' || !button) return;
       const down = type === 'pointerdown';
-      if (down) { c.focus(); c.setPointerCapture(e.pointerId); this.buttons.add(button); }
+      if (down) { c.focus({preventScroll:true}); c.setPointerCapture(e.pointerId); this.buttons.add(button); }
       else { this.buttons.delete(button); if (c.hasPointerCapture(e.pointerId)) c.releasePointerCapture(e.pointerId); }
       this.send({mouseEvent:{mask:(button << 3) | (down ? 1 : 2), ...p, modifiers:modifiers(e)}});
     });

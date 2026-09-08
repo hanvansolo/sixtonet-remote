@@ -204,3 +204,23 @@ test('popout returns to a fresh console host after its original pane is removed'
   expect(errors).toEqual([]);
   await page.evaluate(()=>viewer.close());
 });
+
+
+test('taking canvas focus does not scroll between mouse down and up', async ({page}) => {
+  await page.setViewportSize({width:1100,height:650});
+  await page.route('https://desktop.test/**', route=>route.fulfill({contentType:route.request().url().endsWith('fixture.js')?'application/javascript':'text/html',
+    body:route.request().url().endsWith('fixture.js')?readFileSync('dist/browser-fixture.js'):'<div style="height:350px">Support tools</div><div id="viewer"></div><script src="/fixture.js"></script>'}));
+  await page.goto('https://desktop.test/?control');
+  await page.getByRole('button',{name:'Start desktop'}).click();
+  await expect(page.getByText('Live \u00b7 you have mouse and keyboard control',{exact:true})).toBeVisible({timeout:15000});
+  await page.evaluate(()=>window.scrollTo(0,0));
+  const box=await page.locator('canvas').boundingBox();
+  await page.mouse.move(box.x+100,box.y+35);
+  const before=await page.evaluate(()=>window.scrollY);
+  await page.mouse.down();
+  expect(await page.evaluate(()=>window.scrollY)).toBe(before);
+  await page.mouse.up();
+  await expect.poll(()=>page.evaluate(()=>observed.mouse.filter(m=>m.mask===9||m.mask===10).length)).toBe(2);
+  const events=await page.evaluate(()=>observed.mouse.filter(m=>m.mask===9||m.mask===10));
+  expect(events[0].x).toBe(events[1].x);expect(events[0].y).toBe(events[1].y);
+});
