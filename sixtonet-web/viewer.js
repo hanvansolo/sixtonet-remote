@@ -57,8 +57,8 @@ export function keyboardEvent(e, down) {
 const MAX_CLIPBOARD = 1024 * 1024;
 
 export class Viewer {
-  constructor(root, {url, exec, input = false, clipboard = false, controlOnConnect = false, title = 'SixtoNet Remote Desktop', returnHost = null}) {
-    this.returnHost = returnHost;
+  constructor(root, {url, exec, input = false, clipboard = false, controlOnConnect = false, title = 'SixtoNet Remote Desktop', returnHost = null, onDisconnect = null}) {
+    this.returnHost = returnHost; this.onDisconnect = onDisconnect;
     this.root = root; this.url = url; this.exec = exec; this.allowInput = input;
     this.allowClipboard = clipboard; this.remoteClipboard = null; this.title = title;
     root.classList.add('desktop-viewer');
@@ -466,7 +466,11 @@ export class Viewer {
     for (const button of buttons) this.send({mouseEvent:{mask:(button << 3) | 2}});
     this.held.clear(); this.buttons.clear();
   }
-  fail(message) { this.status.textContent = message; this.close(); }
+  fail(message) {
+    if (this.closed) return;
+    this.status.textContent = message; this.close();
+    this.onDisconnect?.();
+  }
   close() {
     if (this.closed) return;
     if (this.closing) return;

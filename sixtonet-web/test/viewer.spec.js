@@ -233,7 +233,8 @@ test('ended desktop clears the frozen picture, exits fullscreen and remains dism
   await expect.poll(()=>page.evaluate(()=>viewer.lastFrame)).toBeGreaterThan(0);
   await page.getByRole('button',{name:'Full screen',exact:true}).click();
   await expect.poll(()=>page.evaluate(()=>!!document.fullscreenElement)).toBe(true);
-  await page.evaluate(()=>viewer.fail('The remote user ended this session.'));
+  await page.evaluate(()=>{window.disconnects=0;viewer.onDisconnect=()=>window.disconnects++;viewer.fail('The remote user ended this session.');viewer.fail('Duplicate disconnect');});
+  expect(await page.evaluate(()=>window.disconnects)).toBe(1);
   await expect.poll(()=>page.evaluate(()=>!!document.fullscreenElement)).toBe(false);
   await expect(page.locator('#viewer canvas')).toHaveCount(0);
   await expect(page.getByText('The remote user ended this session.')).toBeVisible();
