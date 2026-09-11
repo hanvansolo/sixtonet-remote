@@ -19,6 +19,8 @@ function element(tag, text, cls) {
 function buttonLabel(button, label) {
   button.title = label;
   button.setAttribute('aria-label', label);
+  const caption = button.querySelector('.desktop-button-label');
+  if (caption) caption.textContent = label;
 }
 function iconButton(label, path, cls = '') {
   const button = element('button', '', `btn sm desktop-icon ${cls}`.trim());
@@ -30,6 +32,7 @@ function iconButton(label, path, cls = '') {
     'stroke-linejoin':'round', 'aria-hidden':'true', focusable:'false'})) svg.setAttribute(key, value);
   const shape = document.createElementNS(svg.namespaceURI, 'path');
   shape.setAttribute('d', path); svg.append(shape); button.append(svg);
+  button.append(element('span', label, 'desktop-button-label'));
   return button;
 }
 function modifiers(e) {
@@ -68,7 +71,13 @@ export class Viewer {
     this.events = new AbortController(); this.pending = 0;
     this.decodeTimes = new Map(); this.targetFps = 30; this.lastPressure = 0;
     this.lastRateChange = 0; this.recoveries = 0; this.presented = 0;
-    const head = element('div', '', 'card-head');
+    const head = element('header', '', 'desktop-session-head');
+    const identity = element('div', '', 'desktop-session-identity');
+    identity.append(element('span', 'REMOTE RESPONSE', 'desktop-eyebrow'), element('h2', title));
+    this.phaseBadge = element('span', 'Ready', 'desktop-phase');
+    this.phaseBadge.setAttribute('role', 'status');
+    this.phaseBadge.setAttribute('aria-live', 'polite');
+    head.append(identity, this.phaseBadge);
     this.startButton = iconButton('Start desktop', 'M8 5l11 7-11 7Z', 'primary');
     this.controlButton = iconButton('Take control', 'M4 3l6 17 3-7 7-3Z M13 13l6 6');
     this.controlButton.setAttribute('aria-pressed', String(this.control));
@@ -78,36 +87,99 @@ export class Viewer {
     this.monitor = element('select', '', 'sel'); this.monitor.setAttribute('aria-label', 'Remote monitor');
     const full = iconButton('Full screen', 'M8 3H3v5 M16 3h5v5 M3 16v5h5 M21 16v5h-5');
     const popout = this.popoutButton = iconButton('Pop out', 'M14 3h7v7 M21 3l-9 9 M10 5H4v15h15v-6');
-    const fit = iconButton('Actual size', 'M4 8V4h4 M16 4h4v4 M20 16v4h-4 M8 20H4v-4 M8 8h8v8H8Z');
-    fit.setAttribute('aria-pressed', 'false');
+    const scale = this.scale = element('select', '', 'sel');
+    scale.setAttribute('aria-label', 'Desktop zoom');
+    for (const [value, label] of [['fit','Fit to window'],['100','100% - actual size'],['125','125%'],['150','150%'],['200','200%']]) {
+      const option = element('option', label); option.value = value; scale.append(option);
+    }
+    const focus = iconButton('Focus on screen', 'M8 3H3v5 M16 3h5v5 M3 16v5h5 M21 16v5h-5');
+    focus.setAttribute('aria-pressed', 'false');
     const disconnect = iconButton('Disconnect desktop', 'M12 3v9 M6 5a9 9 0 1 0 12 0', 'danger');
-    const sas = iconButton('Ctrl+Alt+Delete', 'M3 5h18v14H3Z M7 9h.01 M11 9h.01 M15 9h.01 M7 13h.01 M11 13h.01 M15 13h2 M7 16h10');
+    const sas = this.sasButton = iconButton('Ctrl+Alt+Delete', 'M3 5h18v14H3Z M7 9h.01 M11 9h.01 M15 9h.01 M7 13h.01 M11 13h.01 M15 13h2 M7 16h10');
     sas.disabled = !input;
     const quality = this.quality = element('select', '', 'sel'); quality.setAttribute('aria-label', 'Stream quality');
     for (const [v,t] of [[2,'Low bandwidth'],[3,'Balanced'],[4,'Best quality']]) {
       const o = element('option',t); o.value = v; quality.append(o);
     }
     quality.value = '4';
-    this.status = element('p', 'Ready to start an encrypted desktop stream.', 'sub');
-    this.stats = element('span', '', 'sub');
+    this.status = element('p', 'Ready to start an encrypted desktop stream.', 'desktop-status');
+    this.stats = element('span', '', 'desktop-stream-stats');
     this.clipStatus = element('p', clipboard ? 'Text clipboard sharing is enabled. Paste here with Ctrl+V; copy remote text with the button.' :
       'Two-way clipboard is off. Enable it when opening the live session.', 'sub');
-    const paste = iconButton('Paste local clipboard', 'M9 4H5v17h14V4h-4 M9 2h6v4H9Z M12 9v8 M9 14l3 3 3-3');
+    const paste = this.pasteButton = iconButton('Paste local clipboard', 'M9 4H5v17h14V4h-4 M9 2h6v4H9Z M12 9v8 M9 14l3 3 3-3');
     this.copy = iconButton('Copy remote clipboard', 'M9 4H5v17h14V4h-4 M9 2h6v4H9Z M12 17V9 M9 12l3-3 3 3');
     paste.disabled = !clipboard || !input; this.copy.disabled = true;
     this.stage = element('div', '', 'desktop-stage');
     this.canvas = element('canvas'); this.canvas.tabIndex = 0;
     this.canvas.setAttribute('aria-label', 'Remote desktop. Take control to use mouse and keyboard.');
     this.canvas.hidden = true; this.stage.append(this.canvas);
-    head.append(this.startButton, this.controlButton, this.monitor, quality, popout, full, fit, sas, paste, this.copy, disconnect, this.stats);
-    root.append(head, this.status, this.clipStatus, this.stage);
+    this.emptyState = element('div', '', 'desktop-empty-state');
+    const screenMark = element('div', '', 'desktop-screen-mark');
+    screenMark.setAttribute('aria-hidden', 'true');
+    this.emptyTitle = element('h3', 'Your remote workspace');
+    this.emptyNote = element('p', 'Start the desktop to authenticate the endpoint and request its picture.');
+    this.emptyState.append(screenMark, this.emptyTitle, this.emptyNote);
+    this.stage.append(this.emptyState);
+    this.stallNotice = element('div', 'Connection stalled. The last picture is not current; remote input is suspended.', 'desktop-stall-notice');
+    this.stallNotice.setAttribute('role', 'status');
+    this.stallNotice.hidden = true;
+    head.append(disconnect);
+    const toolbar = element('div', '', 'desktop-session-toolbar');
+    const sessionControls = element('div', '', 'desktop-control-group');
+    sessionControls.append(this.startButton, this.controlButton);
+    const displayControls = element('div', '', 'desktop-control-group desktop-display-controls');
+    const monitorLabel = element('label', '', 'desktop-select-field');
+    monitorLabel.append(element('span', 'Display'), this.monitor);
+    this.monitor.append(element('option', 'Waiting for endpoint'));
+    this.monitor.disabled = true;
+    const scaleLabel = element('label', '', 'desktop-select-field');
+    scaleLabel.append(element('span', 'Zoom'), scale);
+    displayControls.append(monitorLabel, scaleLabel, focus, popout, full);
+    const tools = iconButton('Session tools', 'M4 7h16 M4 17h16 M8 4v6 M16 14v6');
+    tools.setAttribute('aria-expanded', 'false');
+    toolbar.append(sessionControls, displayControls, tools);
+    const workarea = element('div', '', 'desktop-workarea');
+    const panel = element('aside', '', 'desktop-tools-panel');
+    panel.setAttribute('aria-label', 'Remote session tools');
+    panel.hidden = true;
+    panel.append(element('h3', 'Session tools'), element('p', 'Available actions follow this live session\'s permissions.', 'desktop-tool-note'));
+    const qualityLabel = element('label', '', 'desktop-select-field');
+    qualityLabel.append(element('span', 'Picture quality'), quality);
+    const refresh = this.refreshButton = iconButton('Refresh picture', 'M20 7v5h-5 M4 17v-5h5 M6 7a7 7 0 0 1 12-1l2 3 M4 15l2 3a7 7 0 0 0 12-1');
+    refresh.disabled = true;
+    panel.append(qualityLabel, refresh, element('h4', 'Remote input'));
+    this.inputNote = element('p', '', 'desktop-tool-note');
+    panel.append(this.inputNote, sas, element('h4', 'Text clipboard'), this.clipStatus, paste, this.copy);
+    panel.append(element('p', 'Clipboard text is transferred only through the permitted session. These buttons do not grant new permissions.', 'desktop-tool-note'));
+    workarea.append(this.stage, panel);
+    const footer = element('footer', '', 'desktop-session-footer');
+    this.dimensions = element('span', 'No picture yet');
+    this.elapsed = element('span', 'Not authenticated');
+    footer.append(this.dimensions, this.stats, this.elapsed);
+    this.displayRail = element('nav', '', 'desktop-display-rail');
+    this.displayRail.setAttribute('aria-label', 'Remote displays');
+    this.displayRail.hidden = true;
+    root.append(head, toolbar, this.displayRail, this.status, this.stallNotice, workarea, footer);
     const on = (el, name, fn) => el.addEventListener(name, fn, {signal:this.events.signal});
     on(this.startButton, 'click', () => this.start().catch(e => this.fail(e.message)));
+    on(tools, 'click', () => {
+      panel.hidden = !panel.hidden;
+      workarea.classList.toggle('tools-open', !panel.hidden);
+      tools.setAttribute('aria-expanded', String(!panel.hidden));
+      tools.classList.toggle('primary', !panel.hidden);
+    });
+    on(refresh, 'click', () => {
+      if (!this.authenticatedAt || this.closed) return;
+      this.releaseInput();
+      this.send({misc:{refreshVideo:true}});
+      this.status.textContent = 'Requested a fresh picture from the endpoint.';
+    });
     on(this.controlButton, 'click', () => {
       this.releaseInput(); this.control = !this.control;
       buttonLabel(this.controlButton, this.control ? 'Give back control' : 'Take control');
       this.controlButton.setAttribute('aria-pressed', String(this.control));
       this.controlButton.classList.toggle('primary', this.control);
+      this.updateChrome();
       if (this.control) this.canvas.focus();
     });
     on(full, 'click', () => {
@@ -115,10 +187,16 @@ export class Viewer {
       (doc.fullscreenElement ? doc.exitFullscreen() : root.requestFullscreen()).catch(() => {});
     });
     on(popout, 'click', () => this.popOut());
-    on(fit, 'click', () => {
-      const actual = this.stage.classList.toggle('actual-size');
-      buttonLabel(fit, actual ? 'Fit to window' : 'Actual size');
-      fit.setAttribute('aria-pressed', String(actual));
+    on(scale, 'change', () => {
+      this.releaseInput();
+      this.stage.scrollTop = this.stage.scrollLeft = 0;
+      this.updateChrome();
+    });
+    on(focus, 'click', () => {
+      this.releaseInput();
+      const focused = root.classList.toggle('desktop-focused');
+      focus.setAttribute('aria-pressed', String(focused));
+      buttonLabel(focus, focused ? 'Show session details' : 'Focus on screen');
     });
     on(disconnect, 'click', () => { this.status.textContent = 'Desktop disconnected.'; this.close(); });
     on(paste, 'click', () => this.pasteLocal());
@@ -130,6 +208,7 @@ export class Viewer {
       this.clearPresentation(); this.decodeTimes.clear();
       this.decoder?.reset(); if (this.decoder) this.configureDecoder();
       this.send({misc:{switchDisplay:{display:this.displayIndex}}});
+      this.updateChrome();
     });
     this.inputEvents(on);
     on(window, 'blur', () => this.releaseInput());
@@ -152,7 +231,71 @@ export class Viewer {
         this.releaseInput(); this.controlButton.disabled = true;
         this.status.textContent = 'Waiting for the next desktop frame; control is suspended.';
       }
+      this.updateChrome();
     }, 1000);
+    this.updateChrome();
+  }
+
+  updateChrome() {
+    if (this.closed) return;
+    const now = Date.now();
+    const live = this.lastFrame > 0 && now - this.lastPacket < 5000;
+    this.root.dataset.connection = live ? 'live' : 'waiting';
+    this.stallNotice.hidden = !(this.lastFrame > 0 && !live);
+    const actual = this.scale.value !== 'fit';
+    this.stage.classList.toggle('actual-size', actual);
+    this.canvas.style.width = actual ? `${this.canvas.width * Number(this.scale.value) / 100}px` : '';
+    this.canvas.style.height = actual ? `${this.canvas.height * Number(this.scale.value) / 100}px` : '';
+    const displaySignature = JSON.stringify([this.displays, this.displayIndex, !!this.authenticatedAt]);
+    if (displaySignature !== this.displaySignature) {
+      this.displaySignature = displaySignature;
+      this.displayRail.replaceChildren();
+      this.displayRail.hidden = this.displays.length < 2;
+      this.displays.forEach((display, index) => {
+        const choice = element('button', '', 'desktop-display-choice');
+        choice.type = 'button';
+        choice.append(element('strong', `Display ${index + 1}`),
+          element('span', `${display.name || 'Monitor'} / ${display.width} x ${display.height}`));
+        choice.setAttribute('aria-pressed', String(index === this.displayIndex));
+        choice.disabled = !this.authenticatedAt;
+        choice.addEventListener('click', () => {
+          if (index === this.displayIndex || this.closed) return;
+          this.monitor.value = String(index);
+          this.monitor.dispatchEvent(new Event('change'));
+        }, {signal:this.events.signal});
+        this.displayRail.append(choice);
+      });
+    }
+    const phase = live ? (this.canInput() ? 'Live - controlling' : 'Live - view only') :
+      this.lastFrame ? 'Connection stalled' : this.authenticatedAt ? 'Waiting for video' :
+      this.ws ? 'Authenticating' : 'Ready';
+    if (this.phaseBadge.textContent !== phase) this.phaseBadge.textContent = phase;
+    this.phaseBadge.dataset.state = live ? 'live' : this.ws ? 'waiting' : 'ready';
+    this.emptyState.hidden = this.lastFrame > 0;
+    this.emptyTitle.textContent = this.authenticatedAt ? 'Waiting for the endpoint picture' :
+      this.ws ? 'Establishing your remote session' : 'Your remote workspace';
+    this.emptyNote.textContent = this.authenticatedAt ?
+      'Windows has authenticated. Control stays unavailable until a video frame arrives.' :
+      this.ws ? 'Checking the endpoint identity and establishing the encrypted desktop channel.' :
+      'Start the desktop to authenticate the endpoint and request its picture.';
+    this.refreshButton.disabled = !this.authenticatedAt;
+    this.sasButton.disabled = !this.canInput();
+    this.pasteButton.disabled = !this.allowClipboard || !this.canInput();
+    this.monitor.disabled = !this.authenticatedAt || this.displays.length < 2;
+    if (this.popup) this.displays.forEach((display, index) => {
+      const option = this.monitor.options[index];
+      if (option) option.textContent = `Display ${index + 1} (${display.width} x ${display.height})`;
+    });
+    this.inputNote.textContent = !this.allowInput ? 'View-only grant. Remote input is not permitted.' :
+      !live ? 'Input is suspended until the picture and connection are ready.' :
+      this.control ? 'You have control. Focus the picture to send mouse and keyboard input.' :
+      'Input is permitted but switched off. Use Take control to enable it.';
+    if (this.authenticatedAt) {
+      const seconds = Math.max(0, Math.floor((now - this.authenticatedAt) / 1000));
+      this.elapsed.textContent = `Authenticated ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+    }
+    this.dimensions.textContent = this.lastFrame ?
+      `${this.canvas.width} x ${this.canvas.height} / Display ${this.displayIndex + 1}` : 'No picture yet';
   }
 
   popOut() {
@@ -178,6 +321,30 @@ export class Viewer {
       }
     }
     doc.body.className = 'desktop-popout';
+    const popoutIconPaths = {
+      'Start desktop':'M9 5l11 7-11 7V5Z M4 5v14',
+      'Take control':'M5 3v16l4-4 4 6 3-2-4-6h7L5 3Z',
+      'Give back control':'M5 3v16l4-4 4 6 3-2-4-6h7L5 3Z',
+      'Full screen':'M9 3H3v6 M15 3h6v6 M3 15v6h6 M21 15v6h-6',
+      'Focus on screen':'M3 8V4h4 M17 4h4v4 M21 16v4h-4 M7 20H3v-4 M8 8h8v8H8Z',
+      'Show session details':'M3 8V4h4 M17 4h4v4 M21 16v4h-4 M7 20H3v-4 M8 8h8v8H8Z',
+      'Actual size':'M4 4h16v16H4Z M8 9l2-2v10 M14 9l2-2v10',
+      'Fit to window':'M4 4h16v16H4Z M8 9l2-2v10 M14 9l2-2v10',
+      'Session tools':'M4 6h8 M16 6h4 M4 12h2 M10 12h10 M4 18h10 M18 18h2 M12 3v6 M6 9v6 M14 15v6',
+      'Refresh picture':'M20 10a8 8 0 0 0-14-5L3 8 M3 3v5h5 M4 14a8 8 0 0 0 14 5l3-3 M16 16h5v5',
+      'Disconnect desktop':'M12 2v10 M7 5a8 8 0 1 0 10 0',
+      'Ctrl+Alt+Delete':'M3 5h18v14H3Z M7 9h1 M11 9h1 M15 9h2 M7 13h1 M11 13h1 M15 13h2 M8 16h8',
+      'Paste local clipboard':'M8 4H5v17h14V4h-3 M8 2h8v4H8Z M12 9v8 M9 14l3 3 3-3',
+      'Copy remote clipboard':'M8 8h12v13H8Z M16 8V3H3v13h5'
+    };
+    this.popoutIcons = [];
+    this.root.querySelectorAll('.desktop-icon').forEach(button => {
+      const path = button.querySelector('svg path');
+      const replacement = popoutIconPaths[button.getAttribute('aria-label')];
+      if (!path || !replacement) return;
+      this.popoutIcons.push([path, path.getAttribute('d')]);
+      path.setAttribute('d', replacement);
+    });
     this.anchor = document.createComment('desktop pop-out return point');
     this.root.before(this.anchor);
     this.placeholder = element('button', 'Return desktop to this tab', 'btn');
@@ -193,6 +360,8 @@ export class Viewer {
   returnToTab() {
     const popup = this.popup;
     if (!popup) return;
+    for (const [path, original] of this.popoutIcons || []) path.setAttribute('d', original);
+    this.popoutIcons = [];
     const host = !this.closed && !this.anchor?.isConnected ? this.returnHost?.() : null;
     this.popup = null; this.releaseInput(); this.clearPresentation();
     this.popoutButton.hidden = false;
@@ -308,6 +477,7 @@ export class Viewer {
         if (this.canvas.height !== image.displayHeight) this.canvas.height = image.displayHeight;
         this.canvas.getContext('2d', {alpha:false}).drawImage(image, 0, 0);
         this.canvas.hidden = false; this.lastFrame = Date.now(); this.frames++; this.presented++;
+        this.emptyState.hidden = true;
         this.controlButton.disabled = !this.allowInput;
         this.status.textContent = this.control ? 'Live · you have mouse and keyboard control' : 'Live · view only';
       } finally { image.close(); }
@@ -393,6 +563,7 @@ export class Viewer {
         const o = element('option', `${d.name || `Monitor ${i+1}`} · ${d.width}×${d.height}`); o.value = i; return o;
       }));
       this.monitor.value = this.displayIndex;
+      this.updateChrome();
       this.status.textContent = 'Authenticated · waiting for the first video frame…';
     }
     if (message.testDelay && !message.testDelay.fromClient) this.send({testDelay:message.testDelay});
@@ -494,6 +665,7 @@ export class Viewer {
   }
   fail(message) {
     if (this.closed) return;
+    this.failureMessage = message;
     this.status.textContent = message; this.close();
     this.onDisconnect?.(message);
   }
@@ -517,7 +689,11 @@ export class Viewer {
     const dismiss = element('button', 'Close remote view', 'btn');
     // Cleanup aborted the streaming listeners; this local close action must remain usable.
     dismiss.addEventListener('click', () => { this.root.hidden = true; });
-    this.root.replaceChildren(this.status, dismiss);
+    const ended = element('section', '', 'desktop-ended');
+    ended.append(element('span', 'SESSION ENDED', 'desktop-eyebrow'),
+      element('h3', this.failureMessage ? 'Desktop connection interrupted' : 'Desktop disconnected'),
+      this.status, element('p', 'Remote input has been released and this viewer\'s clipboard state cleared.', 'desktop-tool-note'), dismiss);
+    this.root.replaceChildren(ended);
     this.returnToTab();
   }
 }
