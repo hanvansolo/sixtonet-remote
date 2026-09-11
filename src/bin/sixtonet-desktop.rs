@@ -58,6 +58,10 @@ fn run() -> hbb_common::ResultType<()> {
     let config = sixtonet::read_config(&root.join("session.json"))?;
     validate_user_session(&config)?;
     if std::env::args().nth(1).as_deref() == Some("--server") {
+        if config.unattended_console && !config.input && !config.clipboard && !config.audio {
+            // Diagnostics must not prevent support if the log cannot be opened.
+            let _ = sixtonet::capture_diagnostics(&root.join("capture-unattended.log"));
+        }
         if librustdesk::platform::windows::get_current_process_session_id() != Some(config.windows_session_id) {
             bail!("capture process is not in the selected Windows user session");
         }
@@ -71,7 +75,7 @@ fn run() -> hbb_common::ResultType<()> {
         }
         return result;
     }
-    // The SYSTEM agent selects an existing active user session. This does not
+    // The SYSTEM agent selects an existing user or explicit console session. This does not
     // create a login, transfer the user, disconnect RDP or unlock Windows.
     let session_id = config.windows_session_id;
     if session_id == u32::MAX {
@@ -111,7 +115,7 @@ fn run() -> hbb_common::ResultType<()> {
     while sixtonet::now().map(|now| now < deadline).unwrap_or(false)
         && root.join("session.json").exists()
     {
-        // A user logout/disconnect must end sharing, never retarget another desktop.
+        // User sessions end on logout/disconnect; console sessions stay bound to the same console ID.
         if validate_user_session(&config).is_err() { break; }
         let status = unsafe { WaitForSingleObject(handle, 200) };
         if status == 0 {
@@ -141,6 +145,15 @@ fn main() {
 
 #[cfg(all(windows, feature = "sixtonet"))]
 fn validate_user_session(cfg: &librustdesk::sixtonet::SessionConfig) -> hbb_common::ResultType<()> {
+    if cfg.unattended_console {
+        #[link(name = "Kernel32")]
+        extern "system" { fn WTSGetActiveConsoleSessionId() -> u32; }
+        let current = unsafe { WTSGetActiveConsoleSessionId() };
+        if !matches_console(cfg.windows_session_id, current) {
+            hbb_common::bail!("selected Windows console changed or is unavailable");
+        }
+        return Ok(());
+    }
     // winapi 0.3's wtsapi32 module has no bindings for these functions.
     #[link(name = "Wtsapi32")]
     extern "system" {
@@ -186,4 +199,24 @@ fn validate_user_session(cfg: &librustdesk::sixtonet::SessionConfig) -> hbb_comm
 
     }
     Ok(())
+}
+
+#[cfg(any(test, all(windows, feature = "sixtonet")))]
+fn matches_console(selected: u32, current: u32) -> bool {
+    selected != 0 && selected != u32::MAX && selected == current
+}
+
+#[cfg(test)]
+mod console_session_tests {
+    use super::matches_console;
+
+    #[test]
+    fn permits_only_the_exact_non_service_console() {
+        assert!(matches_console(1, 1));
+        assert!(matches_console(7, 7));
+        assert!(!matches_console(0, 0));
+        assert!(!matches_console(u32::MAX, u32::MAX));
+        assert!(!matches_console(1, 2));
+        assert!(!matches_console(1, u32::MAX));
+    }
 }

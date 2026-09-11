@@ -36,6 +36,8 @@ jobs:
         run: |
           cargo test --locked --lib --features sixtonet sixtonet::tests
           if ($LASTEXITCODE -ne 0) { throw 'Adapter tests failed' }
+          cargo test --locked --features sixtonet --bin sixtonet-desktop console_session_tests
+          if ($LASTEXITCODE -ne 0) { throw 'Console session tests failed' }
           cargo build --locked --release --features sixtonet --bin sixtonet-desktop
           if ($LASTEXITCODE -ne 0) { throw 'Adapter build failed' }
           Get-FileHash target/release/sixtonet-desktop.exe -Algorithm SHA256 | Format-List

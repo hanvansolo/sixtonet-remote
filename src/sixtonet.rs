@@ -43,6 +43,8 @@ pub fn valid_browser_clipboard(cb: &hbb_common::message_proto::Clipboard) -> boo
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SessionConfig {
+    #[serde(default)]
+    pub unattended_console: bool,
     pub windows_session_id: u32,
     pub windows_username: String,
     pub windows_domain: String,
@@ -59,7 +61,7 @@ pub struct SessionConfig {
 impl SessionConfig {
     pub fn validate(&self, now: u64) -> ResultType<()> {
         if self.windows_session_id == 0 || self.windows_session_id == u32::MAX
-            || self.windows_username.is_empty() || self.operator.len() > 800
+            || (!self.unattended_console && self.windows_username.is_empty()) || self.operator.len() > 800
             || self.port < 1024
             || self.nonce.len() != 64
             || self.password.len() != 64
@@ -167,6 +169,7 @@ mod tests {
     }
     fn config() -> SessionConfig {
         SessionConfig {
+            unattended_console: false,
             windows_session_id: 7,
             windows_username: "LabUser".into(),
             windows_domain: "LAB".into(),
@@ -192,6 +195,18 @@ mod tests {
         assert!(c.validate(1000).is_err());
     }
     #[test]
+    fn unattended_console_is_explicit_and_still_excludes_session_zero() {
+        let mut c = config();
+        c.windows_username.clear();
+        assert!(c.validate(1000).is_err());
+        c.unattended_console = true;
+        assert!(c.validate(1000).is_ok());
+        c.windows_session_id = 0;
+        assert!(c.validate(1000).is_err());
+        c.windows_session_id = u32::MAX;
+        assert!(c.validate(1000).is_err());
+    }
+    #[test]
     fn permissions_are_explicit_and_least_privilege() {
         let mut c = config();
         assert_eq!(c.permissions(), 0x5555_5555_5555_5555);
@@ -200,4 +215,24 @@ mod tests {
         assert_eq!((c.permissions() >> 6) & 3, 1); // files not implicitly allowed
         assert_eq!((c.permissions() >> 8) & 3, 1); // audio not implicitly allowed
     }
+}
+
+/// Bounded capture metadata for an unattended view-only diagnostic session.
+pub fn capture_diagnostics(path: &Path) -> ResultType<()> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let file = std::fs::File::create(path)?;
+    let lines = AtomicUsize::new(0);
+    hbb_common::env_logger::Builder::new()
+        .filter_level(hbb_common::log::LevelFilter::Off)
+        .filter_module("librustdesk::server::video_service", hbb_common::log::LevelFilter::Info)
+        .filter_module("librustdesk::server::service", hbb_common::log::LevelFilter::Error)
+        .format(move |out, record| {
+            if lines.fetch_add(1, Ordering::Relaxed) >= 200 { return Ok(()); }
+            let message: String = record.args().to_string().chars().take(512).collect();
+            writeln!(out, "{}: {}", record.target(), message)
+        })
+        .target(hbb_common::env_logger::Target::Pipe(Box::new(file)))
+        .try_init()?;
+    Ok(())
 }
